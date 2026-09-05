@@ -1,0 +1,9 @@
+{
+  "name": "땅따먹기",
+  "short_name": "땅따먹기",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1b2430",
+  "theme_color": "#1b2430",
+  "icons": [{ "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" }]
+}
