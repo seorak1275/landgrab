@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" href="assets/icon-180.png">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1b2430">
+<title>땅따먹기</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <span id="top-gold">💰 0</span>
+  <span id="top-rate">+0/초</span>
+  <span id="top-prestige">환생 0</span>
+  <span id="top-points">✨ 0</span>
+  <button id="btn-menu" type="button">≡</button>
+</header>
+<canvas id="canvas"></canvas>
+<section id="panel">
+  <div id="p-title">타일을 탭하세요</div>
+  <div id="p-stats"></div>
+  <div id="p-actions">
+    <button id="btn-upgrade" type="button" disabled>업그레이드</button>
+    <div id="ratio">
+      <button class="ratio-btn" data-r="0.25" type="button">25%</button>
+      <button class="ratio-btn active" data-r="0.5" type="button">50%</button>
+      <button class="ratio-btn" data-r="1" type="button">100%</button>
+    </div>
+  </div>
+  <div id="hint">내 땅을 탭한 뒤 옆 땅을 탭하면 공격/이동</div>
+</section>
+<div id="modal" hidden>
+  <div id="modal-box">
+    <h2 id="modal-title"></h2>
+    <div id="modal-body"></div>
+    <div id="modal-actions"></div>
+  </div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
