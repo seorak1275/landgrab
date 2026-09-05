@@ -11,37 +11,76 @@ export function formatNum(n) {
 const $ = id => document.getElementById(id);
 export function ownerName(owner) { return owner === NEUTRAL ? '중립' : owner === PLAYER ? '나' : `AI ${owner}`; }
 
+// 매 프레임 호출되므로 값이 바뀔 때만 DOM을 건드린다
+const lastText = new Map();
+function setText(id, text) { if (lastText.get(id) !== text) { lastText.set(id, text); $(id).textContent = text; } }
+function setHtml(id, html) { if (lastText.get(id) !== html) { lastText.set(id, html); $(id).innerHTML = html; } }
+
 export function updateTop(state, rate) {
-  $('top-gold').textContent = `💰 ${formatNum(state.run.gold[PLAYER])}`;
-  $('top-rate').textContent = `+${rate.toFixed(1)}/초`;
-  $('top-prestige').textContent = `환생 ${state.legacy.prestigeCount}`;
-  $('top-points').textContent = `✨ ${state.legacy.points}`;
+  setText('top-gold', `💰 ${formatNum(state.run.gold[PLAYER])}`);
+  setText('top-rate', `+${rate.toFixed(1)}/초`);
+  setText('top-prestige', `환생 ${state.legacy.prestigeCount}`);
+  setText('top-points', `✨ ${state.legacy.points}`);
 }
 
-export function updatePanel(state, tile) {
-  const title = $('p-title'), stats = $('p-stats'), btn = $('btn-upgrade');
-  if (!tile) { title.textContent = '타일을 탭하세요'; stats.textContent = ''; btn.disabled = true; btn.textContent = '업그레이드'; return; }
+// 여러 타일 선택 시 업그레이드 계획: 낮은 레벨부터 골드가 닿는 만큼
+export function upgradePlan(state, tiles) {
+  const plan = []; let gold = state.run.gold[PLAYER], total = 0;
+  for (const t of [...tiles].filter(t => t.level < MAX_LEVEL).sort((a, b) => a.level - b.level)) {
+    const c = upgradeCost(t);
+    if (gold < c) break;
+    gold -= c; total += c; plan.push(t);
+  }
+  return { tiles: plan, cost: total };
+}
+
+export function updatePanel(state, { selected = [], inspect = null, multi = false, ratio = 0.5 } = {}) {
+  const btn = $('btn-upgrade');
+  const setBtn = (disabled, text) => { if (btn.disabled !== disabled) btn.disabled = disabled; setText('btn-upgrade', text); };
+  $('btn-multi').classList.toggle('active', multi);
+  if (selected.length > 1) {
+    const soldiers = selected.reduce((s, t) => s + t.soldiers, 0);
+    setHtml('p-title', `<span style="color:${ownerColor(PLAYER)}">■</span> 내 땅 ${selected.length}개 선택`);
+    setText('p-stats', `병사 합계 ${Math.floor(soldiers)} · 보낼 병사 ${Math.floor(soldiers * ratio)} (${Math.round(ratio * 100)}%)\n목적지를 탭하면 전부 거기로 이동/공격`);
+    const plan = upgradePlan(state, selected);
+    if (plan.tiles.length) setBtn(false, `업그레이드 ${plan.tiles.length}개 (💰 ${formatNum(plan.cost)})`);
+    else setBtn(true, selected.every(t => t.level >= MAX_LEVEL) ? '최대 레벨' : '업그레이드 (골드 부족)');
+    return;
+  }
+  const tile = selected[0] || inspect;
+  if (!tile) { setText('p-title', '타일을 탭하세요'); setText('p-stats', ''); setBtn(true, '업그레이드'); return; }
   const tr = TERRAIN[tile.terrain];
-  title.innerHTML = `<span style="color:${ownerColor(tile.owner)}">■</span> ${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}`;
+  setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}`);
   const mine = tile.owner === PLAYER;
   const lines = [`병사 ${Math.floor(tile.soldiers)} / ${Math.floor(cap(tile))}`, `방어 +${Math.round(tr.def * 100)}%`];
   if (mine) lines.push(`생산 골드 ${goldRate(state, tile).toFixed(2)}/초 · 병사 ${soldierRate(state, tile).toFixed(2)}/초`);
-  stats.textContent = lines.join('\n');
+  else lines.push(`점령하려면 ${Math.floor(tile.soldiers * (1 + tr.def)) + 1}명 넘게 보내야 함`);
+  setText('p-stats', lines.join('\n'));
   if (mine && tile.level < MAX_LEVEL) {
     const cost = upgradeCost(tile);
-    btn.disabled = state.run.gold[PLAYER] < cost;
-    btn.textContent = `업그레이드 Lv.${tile.level + 1} (💰 ${formatNum(cost)})`;
-  } else { btn.disabled = true; btn.textContent = mine ? '최대 레벨' : '업그레이드'; }
+    setBtn(state.run.gold[PLAYER] < cost, `업그레이드 Lv.${tile.level + 1} (💰 ${formatNum(cost)})`);
+  } else setBtn(true, mine ? '최대 레벨' : '업그레이드');
 }
 
 export function setRatioButtons(ratio) {
   document.querySelectorAll('.ratio-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.r) === ratio));
 }
 
-export function bindButtons({ onUpgrade, onRatio, onMenu }) {
+let hintTimer = 0, hintDefault = '';
+export function setHint(text) { hintDefault = text; if (!hintTimer) setText('hint', text); }
+// 잠깐 보였다가 기본 안내로 돌아가는 메시지
+export function flashHint(text, ms = 2000) {
+  clearTimeout(hintTimer); setText('hint', text);
+  hintTimer = setTimeout(() => { hintTimer = 0; setText('hint', hintDefault); }, ms);
+}
+
+export function bindButtons({ onUpgrade, onRatio, onMenu, onMulti, onAll, onCenter }) {
   $('btn-upgrade').addEventListener('click', onUpgrade);
   document.querySelectorAll('.ratio-btn').forEach(b => b.addEventListener('click', () => onRatio(Number(b.dataset.r))));
   $('btn-menu').addEventListener('click', onMenu);
+  $('btn-multi').addEventListener('click', onMulti);
+  $('btn-all').addEventListener('click', onAll);
+  $('btn-center').addEventListener('click', onCenter);
 }
 
 export function showModal({ title, html, actions = [], onBodyClick = null }) {

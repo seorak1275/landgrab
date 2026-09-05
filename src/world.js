@@ -27,12 +27,14 @@ export function generateRun(seed, prestige, upgrades = {}) {
   const playerCap = cs[0];
   const capOwner = new Map([[key(...playerCap), PLAYER]]);
   AI_CORNERS.slice(0, aiCount).forEach((ci, i) => capOwner.set(key(...cs[ci]), i + 1));
+  const capitals = [playerCap, ...AI_CORNERS.slice(0, aiCount).map(ci => cs[ci])];
   const tiles = tilesInRadius(radius).map(([q, r], id) => {
     const k = key(q, r);
     const owner = capOwner.has(k) ? capOwner.get(k) : NEUTRAL;
     const terrain = owner === NEUTRAL ? pick(rand, TERRAIN_WEIGHTS) : 'citadel';
+    // 중립 수비는 "가장 가까운 수도"에서 먼 만큼 세진다 — 플레이어 수도 기준으로만 하면 AI 옆 땅이 145명이라 AI가 10분 넘게 못 움직였음
     const soldiers = owner === NEUTRAL
-      ? neutralGarrison(distance([q, r], playerCap), prestige)
+      ? neutralGarrison(Math.min(...capitals.map(c => distance([q, r], c))), prestige)
       : 30 + (owner === PLAYER ? 20 * (upgrades.startArmy || 0) : 0);
     return { id, q, r, terrain, owner, level: 1, soldiers };
   });

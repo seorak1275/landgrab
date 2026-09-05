@@ -21,7 +21,10 @@
   <span id="top-points">✨ 0</span>
   <button id="btn-menu" type="button">≡</button>
 </header>
-<canvas id="canvas"></canvas>
+<div id="map">
+  <canvas id="canvas"></canvas>
+  <button id="btn-center" type="button" title="지도 전체 보기">⌖</button>
+</div>
 <section id="panel">
   <div id="p-title">타일을 탭하세요</div>
   <div id="p-stats"></div>
@@ -33,7 +36,11 @@
       <button class="ratio-btn" data-r="1" type="button">100%</button>
     </div>
   </div>
-  <div id="hint">내 땅을 탭한 뒤 옆 땅을 탭하면 공격/이동</div>
+  <div id="p-select">
+    <button id="btn-multi" type="button">＋ 여러 개 선택</button>
+    <button id="btn-all" type="button">내 땅 전체 선택</button>
+  </div>
+  <div id="hint"></div>
 </section>
 <div id="modal" hidden>
   <div id="modal-box">

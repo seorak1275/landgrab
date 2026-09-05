@@ -48,3 +48,11 @@ test('환생 4회면 반지름 5, AI 3', () => {
   assert.equal(run.tiles.length, 91);
   assert.equal(run.factions, 4);
 });
+
+test('중립 수비는 가장 가까운 수도 기준: AI 수도 옆 땅도 플레이어 수도 옆 땅과 같다', () => {
+  const run = generateRun(7, 0, {});
+  const caps = run.tiles.filter(t => t.owner !== NEUTRAL);
+  const nearest = c => Math.min(...run.tiles.filter(t => t.owner === NEUTRAL && distance([t.q, t.r], [c.q, c.r]) === 1).map(t => t.soldiers));
+  assert.equal(nearest(caps[0]), neutralGarrison(1, 0));
+  for (const c of caps) assert.equal(nearest(c), nearest(caps[0]));
+});

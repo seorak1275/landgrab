@@ -38,7 +38,35 @@ export async function run(h) {
   await h.goto(); await h.wait(800);
   say('offline modal', await h.eval(`document.getElementById('modal-title').textContent + ' / ' + document.getElementById('modal-body').innerText.replace(/\\n/g, ' ')`));
   await h.shot(`${SP}/s4_offline.png`);
-  await h.eval(`document.querySelector('#modal-actions button').click()`);
+  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300);
+  say('after offline confirm', await h.eval(`document.getElementById('modal').hidden ? 'playing' : document.getElementById('modal-title').textContent`));
+  if (!(await h.eval(`document.getElementById('modal').hidden`))) { await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); }
+  // 원거리·다중 명령: 수도에서 한 줄로 3칸을 내 땅으로 만들고, 수도+1칸을 골라 끝의 중립 타일을 공격
+  const far = JSON.parse(await h.eval(`(() => { const run = __game.state.run, dirs = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+    const at = (q, r) => run.tiles.find(t => t.q === q && t.r === r);
+    let cur = run.tiles.find(t => t.owner === 0 && t.terrain === 'citadel'); const ids = [cur.id];
+    for (let i = 0; i < 3; i++) { let n = null; for (const [dq, dr] of dirs) { const c = at(cur.q + dq, cur.r + dr); if (c && c.owner === -1 && !ids.includes(c.id)) { n = c; break; } } n.owner = 0; n.soldiers = 10; ids.push(n.id); cur = n; }
+    let target = null; for (const [dq, dr] of dirs) { const c = at(cur.q + dq, cur.r + dr); if (c && c.owner === -1) { target = c; break; } }
+    target.soldiers = 20; target.terrain = 'plain'; run.tiles[ids[0]].soldiers = 60; run.tiles[ids[1]].soldiers = 40;
+    const c = document.getElementById('canvas').getBoundingClientRect(), cam = __game.cam;
+    const pos = t => [c.left + (${Math.sqrt(3)} * 36 * (t.q + t.r / 2) - cam.x) * cam.scale + c.width / 2, c.top + (1.5 * 36 * t.r - cam.y) * cam.scale + c.height / 2];
+    return JSON.stringify({ ids, targetId: target.id, p0: pos(run.tiles[ids[0]]), p1: pos(run.tiles[ids[1]]), pt: pos(target) }); })()`));
+  const mb2 = JSON.parse(await h.eval(`(() => { const b = document.getElementById('btn-multi').getBoundingClientRect(); return JSON.stringify([b.x + b.width / 2, b.y + b.height / 2]); })()`));
+  await h.click(mb2[0], mb2[1]);
+  await h.tap(far.p0[0], far.p0[1]); await h.tap(far.p1[0], far.p1[1]);
+  say('multi panel', await h.eval(`document.getElementById('p-title').textContent + ' | ' + document.getElementById('p-stats').textContent.split(String.fromCharCode(10))[0] + ' | sel=' + JSON.stringify(__game.sel)`));
+  await h.shot(`${SP}/s4b_multi_preview.png`);
+  await h.tap(far.pt[0], far.pt[1]); await h.wait(100);
+  say('far attack', await h.eval(`(() => { const run = __game.state.run; return 'target owner=' + run.tiles[${far.targetId}].owner + ' soldiers=' + Math.floor(run.tiles[${far.targetId}].soldiers) + ' cap=' + Math.floor(run.tiles[${far.ids[0]}].soldiers) + ' second=' + Math.floor(run.tiles[${far.ids[1]}].soldiers); })()`));
+  await h.shot(`${SP}/s4c_far_attack.png`);
+  await h.click(mb2[0], mb2[1]); // 다중 모드 끄기
+  // 백그라운드 복귀 정산: hidden 상태를 흉내 내고 20분 뒤에 돌아온 것으로
+  await h.eval(`(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); })()`);
+  await h.eval(`(() => { const t0 = Date.now; Date.now = () => t0() + 20 * 60e3; Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); })()`);
+  await h.wait(300);
+  say('resume modal', await h.eval(`document.getElementById('modal-title').textContent + ' / ' + document.getElementById('modal-body').innerText.replace(/\s+/g, ' ')`));
+  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
+  if (!(await h.eval(`document.getElementById('modal').hidden`))) { await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); }
   // 정복 → 환생
   await h.eval(`__game.state.run.tiles.forEach(t => t.owner = 0)`); await h.wait(600);
   say('conquest modal', await h.eval(`document.getElementById('modal-title').textContent`));

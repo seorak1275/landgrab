@@ -2,7 +2,8 @@ import { TERRAIN, NEUTRAL, PLAYER } from './world.js';
 import { neighborIds, cap, upgrade, upgradeCost, send, attackMul, MAX_LEVEL } from './sim.js';
 
 export function aiPeriod(state) { return 8 * (1 + 0.08 * (state.legacy.upgrades.aiSlow || 0)); }
-const priority = owner => (owner === NEUTRAL ? 0 : owner === PLAYER ? 1 : 2);
+// 중립을 먼저, 그다음은 플레이어·다른 AI 가리지 않고 수비 약한 쪽 (플레이어 우선이면 AI 둘이 협공해 활동적인 플레이어도 30분대에 전멸했음)
+const priority = owner => (owner === NEUTRAL ? 0 : 1);
 
 export function aiAct(state, f) {
   const run = state.run;

@@ -26,9 +26,9 @@ test('유산·환생 배율', () => {
   const s = makeState(1, 2, { gold: 3, soldiers: 1, attack: 4 });
   const pc = capitalOf(s, PLAYER), ac = capitalOf(s, 1);
   near(goldRate(s, pc), 1.5 * 1.3);
-  near(goldRate(s, ac), 1.5 * 0.95); // AI 기본 0.75 + 환생 2회 0.2
+  near(goldRate(s, ac), 1.5 * 0.8); // AI 기본 0.6 + 환생 2회 0.2
   near(soldierRate(s, pc), 0.12 * 1.1);
-  near(soldierRate(s, ac), 0.12 * 0.95);
+  near(soldierRate(s, ac), 0.12 * 0.8);
 });
 
 test('tick: 골드 누적, 병사는 한도까지만, 초과분은 유지', () => {
