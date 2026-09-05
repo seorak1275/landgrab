@@ -15,7 +15,7 @@ test('생산·한도·비용 수식', () => {
   const s = makeState();
   const c = capitalOf(s, PLAYER);
   near(goldRate(s, c), 0.5 * 3 * 1);
-  near(soldierRate(s, c), 0.15);
+  near(soldierRate(s, c), 0.12);
   near(cap(c), 40);
   near(upgradeCost(c), 40 * 3);
   c.level = 3;
@@ -26,9 +26,9 @@ test('유산·환생 배율', () => {
   const s = makeState(1, 2, { gold: 3, soldiers: 1, attack: 4 });
   const pc = capitalOf(s, PLAYER), ac = capitalOf(s, 1);
   near(goldRate(s, pc), 1.5 * 1.3);
-  near(goldRate(s, ac), 1.5 * 1.2);
-  near(soldierRate(s, pc), 0.15 * 1.1);
-  near(soldierRate(s, ac), 0.15 * 1.2);
+  near(goldRate(s, ac), 1.5 * 0.95); // AI 기본 0.75 + 환생 2회 0.2
+  near(soldierRate(s, pc), 0.12 * 1.1);
+  near(soldierRate(s, ac), 0.12 * 0.95);
 });
 
 test('tick: 골드 누적, 병사는 한도까지만, 초과분은 유지', () => {
@@ -36,7 +36,7 @@ test('tick: 골드 누적, 병사는 한도까지만, 초과분은 유지', () =
   const c = capitalOf(s, PLAYER);
   tick(s, 10);
   near(s.run.gold[PLAYER], 100 + 15);
-  near(c.soldiers, 31.5);
+  near(c.soldiers, 31.2);
   tick(s, 1000);
   near(c.soldiers, 40);
   c.soldiers = 55; tick(s, 1);

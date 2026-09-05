@@ -9,9 +9,9 @@ test('반지름·AI 수 공식', () => {
 });
 
 test('중립 수비병 공식', () => {
-  assert.equal(neutralGarrison(0, 0), 8);
-  assert.equal(neutralGarrison(3, 0), Math.round(8 * 2.8));
-  assert.equal(neutralGarrison(3, 2), Math.round(8 * 2.8 * 1.3));
+  assert.equal(neutralGarrison(0, 0), 25);
+  assert.equal(neutralGarrison(3, 0), Math.round(25 * 3.4));
+  assert.equal(neutralGarrison(3, 2), Math.round(25 * 3.4 * 1.3));
 });
 
 test('새 판: 타일 수, 수도 배치, 시작 자원', () => {

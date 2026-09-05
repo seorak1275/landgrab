@@ -1,7 +1,7 @@
 import { TERRAIN, NEUTRAL, PLAYER } from './world.js';
 import { neighborIds, cap, upgrade, upgradeCost, send, attackMul, MAX_LEVEL } from './sim.js';
 
-export function aiPeriod(state) { return 6 * (1 + 0.08 * (state.legacy.upgrades.aiSlow || 0)); }
+export function aiPeriod(state) { return 8 * (1 + 0.08 * (state.legacy.upgrades.aiSlow || 0)); }
 const priority = owner => (owner === NEUTRAL ? 0 : owner === PLAYER ? 1 : 2);
 
 export function aiAct(state, f) {
@@ -10,7 +10,7 @@ export function aiAct(state, f) {
   if (mine().length === 0) return;
 
   // 1. 업그레이드: 가장 낮은 레벨(동률이면 골드계수 높은 쪽), 주기당 최대 3회
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 2; i++) {
     const cand = mine().filter(t => t.level < MAX_LEVEL)
       .sort((a, b) => a.level - b.level || TERRAIN[b.terrain].gold - TERRAIN[a.terrain].gold)[0];
     if (!cand || run.gold[f] < upgradeCost(cand)) break;
@@ -26,7 +26,7 @@ export function aiAct(state, f) {
       const n = run.tiles[nid];
       if (n.owner === f) continue;
       const D = n.soldiers * (1 + TERRAIN[n.terrain].def);
-      if (t.soldiers * 0.8 * am > D * 1.2) options.push({ from: t, to: n, D });
+      if (t.soldiers * 0.8 * am > D * 1.4) options.push({ from: t, to: n, D });
     }
   }
   options.sort((a, b) => priority(a.to.owner) - priority(b.to.owner) || a.D - b.D);
@@ -36,7 +36,7 @@ export function aiAct(state, f) {
     if (o.to.owner === f) continue;
     // 앞선 공격으로 병사가 줄었을 수 있으니 현재 값으로 다시 확인
     const D = o.to.soldiers * (1 + TERRAIN[o.to.terrain].def);
-    if (!(o.from.soldiers * 0.8 * am > D * 1.2)) continue;
+    if (!(o.from.soldiers * 0.8 * am > D * 1.4)) continue;
     send(state, o.from.id, o.to.id, 0.8);
     attacks++;
   }

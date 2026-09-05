@@ -5,26 +5,26 @@ import { PLAYER, NEUTRAL } from '../src/world.js';
 import { neighborIds } from '../src/sim.js';
 import { aiPeriod, aiAct, runAi } from '../src/ai.js';
 
-test('주기: 기본 6초, 둔화 2레벨이면 6×1.16', () => {
-  assert.equal(aiPeriod(makeState()), 6);
-  assert.equal(aiPeriod(makeState(1, 0, { aiSlow: 2 })), 6 * 1.16);
+test('주기: 기본 8초, 둔화 2레벨이면 8×1.16', () => {
+  assert.equal(aiPeriod(makeState()), 8);
+  assert.equal(aiPeriod(makeState(1, 0, { aiSlow: 2 })), 8 * 1.16);
 });
 
-test('골드 있으면 가장 낮은 레벨 타일을 업그레이드(주기당 최대 3회)', () => {
+test('골드 있으면 가장 낮은 레벨 타일을 업그레이드(주기당 최대 2회)', () => {
   const s = makeState();
   s.run.gold[1] = 100000;
   aiAct(s, 1);
-  assert.equal(capitalOf(s, 1).level, 4);
+  assert.equal(capitalOf(s, 1).level, 3);
 });
 
-test('유리할 때만 공격: 0.8×병사 > 1.2×방어', () => {
+test('유리할 때만 공격: 0.8×병사 > 1.4×방어', () => {
   const s = makeState();
   const c = capitalOf(s, 1);
   const n = s.run.tiles[neighborIds(s.run, c)[0]];
-  n.terrain = 'plain'; n.soldiers = 10; c.soldiers = 14; // 11.2 ≤ 12 → 안 함
+  n.terrain = 'plain'; n.soldiers = 10; c.soldiers = 17; // 13.6 ≤ 14 → 안 함
   aiAct(s, 1);
   assert.equal(n.owner, NEUTRAL);
-  c.soldiers = 16; // 12.8 > 12 → 공격
+  c.soldiers = 18; // 14.4 > 14 → 공격
   aiAct(s, 1);
   assert.equal(n.owner, 1);
 });
@@ -65,9 +65,9 @@ test('runAi: 타이머로 주기마다 발동, 타일 없는 세력은 건너뜀
   s.run.gold[1] = 100000; s.run.gold[2] = 100000;
   for (const t of s.run.tiles) if (t.owner === 2) t.owner = NEUTRAL;
   runAi(s, 0.25);           // timer 0 → 즉시 1회
-  assert.equal(capitalOf(s, 1).level, 4);
-  runAi(s, 5.5);            // 아직 6초 안 됨
-  assert.equal(capitalOf(s, 1).level, 4);
+  assert.equal(capitalOf(s, 1).level, 3);
+  runAi(s, 7.5);            // 아직 8초 안 됨
+  assert.equal(capitalOf(s, 1).level, 3);
   runAi(s, 0.5);
-  assert.equal(capitalOf(s, 1).level, 7);
+  assert.equal(capitalOf(s, 1).level, 5);
 });

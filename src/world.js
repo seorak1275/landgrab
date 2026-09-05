@@ -16,7 +16,7 @@ export const NEUTRAL = -1;
 export function radiusFor(prestige) { return Math.min(3 + Math.floor(prestige / 2), 6); }
 export function aiCountFor(prestige) { return Math.min(2 + Math.floor(prestige / 3), 4); }
 export function neutralGarrison(dist, prestige) {
-  return Math.round(8 * (1 + dist * 0.6) * (1 + prestige * 0.15));
+  return Math.round(25 * (1 + dist * 0.8) * (1 + prestige * 0.15));
 }
 
 export function generateRun(seed, prestige, upgrades = {}) {

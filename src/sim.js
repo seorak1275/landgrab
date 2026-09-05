@@ -2,6 +2,7 @@ import { neighbors, key } from './hex.js';
 import { TERRAIN, PLAYER, NEUTRAL } from './world.js';
 
 export const MAX_LEVEL = 10;
+export const AI_BASE_MUL = 0.75; // AI 생산 배율(골드·병사) 기본값, 환생마다 +0.1
 const indexCache = new WeakMap();
 function index(run) {
   let m = indexCache.get(run.tiles);
@@ -15,15 +16,15 @@ export function neighborIds(run, tile) {
 export function isAdjacent(run, a, b) { return neighborIds(run, a).includes(b.id); }
 
 export function prodMul(state, f) {
-  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.gold || 0) : 1 + 0.1 * state.legacy.prestigeCount;
+  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.gold || 0) : AI_BASE_MUL + 0.1 * state.legacy.prestigeCount;
 }
 export function soldierMul(state, f) {
-  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.soldiers || 0) : 1 + 0.1 * state.legacy.prestigeCount;
+  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.soldiers || 0) : AI_BASE_MUL + 0.1 * state.legacy.prestigeCount;
 }
 export function attackMul(state, f) { return f === PLAYER ? 1 + 0.05 * (state.legacy.upgrades.attack || 0) : 1; }
 export function cap(tile) { return 20 * tile.level * TERRAIN[tile.terrain].cap; }
 export function goldRate(state, tile) { return 0.5 * TERRAIN[tile.terrain].gold * tile.level * prodMul(state, tile.owner); }
-export function soldierRate(state, tile) { return 0.15 * tile.level * soldierMul(state, tile.owner); }
+export function soldierRate(state, tile) { return 0.12 * tile.level * soldierMul(state, tile.owner); }
 export function upgradeCost(tile) { return 40 * Math.pow(1.7, tile.level - 1) * TERRAIN[tile.terrain].gold; }
 export function factionGoldRate(state, f) {
   return state.run.tiles.filter(t => t.owner === f).reduce((s, t) => s + goldRate(state, t), 0);
