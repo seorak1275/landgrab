@@ -15,7 +15,27 @@ const cam = createCamera();
 let state = load() || newState();
 let images = {}, effects = [], acc = 0, saveAcc = 0, last = performance.now(), W = 0, H = 0, ended = false, hiddenAt = 0;
 let sel = [], inspectId = null, multi = false; // sel: 선택한 내 땅 id 목록, inspectId: 남의 땅 정보 보기
-window.__game = { get state() { return state; }, cam, get sel() { return sel; } };
+// 병사 수 변화 연출: 타일마다 마지막 정수값·아직 안 띄운 증가분·마지막 표시 시각
+const FLOAT_EVERY = 1.2; // 내 땅의 "+N"은 이 간격으로 모아서 띄운다 (매 +1마다 띄우면 너무 시끄러움)
+let growth = new Map(), growthRun = null;
+function trackGrowth(now) {
+  if (growthRun !== state.run) { growth.clear(); growthRun = state.run; }
+  for (const t of state.run.tiles) {
+    const n = Math.floor(t.soldiers);
+    let g = growth.get(t.id);
+    if (!g) { growth.set(t.id, { n, acc: 0, at: now }); continue; }
+    if (n !== g.n) {
+      effects.push({ kind: 'pop', toId: t.id, t: 0, speed: 1 / 0.3 });
+      if (n > g.n && t.owner === PLAYER && !t.battle) g.acc += n - g.n;
+      g.n = n;
+    }
+    if (g.acc > 0 && now - g.at >= FLOAT_EVERY) {
+      effects.push({ kind: 'float', toId: t.id, text: `+${g.acc}`, t: 0, color: ownerColor(t.owner), speed: 1 / 0.9 });
+      g.acc = 0; g.at = now;
+    }
+  }
+}
+window.__game = { get state() { return state; }, cam, get sel() { return sel; }, get effects() { return effects; } };
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -129,7 +149,7 @@ function settle(elapsedSec) {
   if (ended || elapsedSec < RESUME_MIN) return;
   effects = [];
   const r = simulateOffline(state, elapsedSec);
-  effects = []; // 시뮬 중 쌓인 연출은 버린다
+  effects = []; growth.clear(); // 시뮬 중 쌓인 연출은 버리고, 정산분이 "+N"으로 뜨지 않게
   save(state);
   ended = true; // 정산 창을 읽는 동안 멈춤 (전멸했어도 확인을 누른 뒤에 전멸 창이 뜨게)
   const diff = r.tilesAfter - r.tilesBefore;
@@ -142,6 +162,7 @@ function loop(now) {
   if (!ended) {
     acc += dt;
     while (acc >= TICK) { tick(state, TICK); runAi(state, TICK); acc -= TICK; }
+    trackGrowth(now / 1000);
     for (const e of effects) e.t += dt * (e.speed || 2.5);
     effects = effects.filter(e => e.t < 1);
     saveAcc += dt; if (saveAcc >= AUTOSAVE) { save(state); saveAcc = 0; }

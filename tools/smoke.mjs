@@ -65,6 +65,9 @@ export async function run(h) {
   say('far attack (battle)', await h.eval(`(() => { const run = __game.state.run, t = run.tiles[${far.targetId}]; return 'owner=' + t.owner + ' attackers=' + Math.floor(t.battle ? t.battle.attackers : -1) + ' defenders=' + Math.floor(t.soldiers) + ' hint=' + document.getElementById('hint').textContent; })()`));
   await h.shot(`${SP}/s4c_far_attack.png`);
   await h.wait(4500);
+  await h.eval(`__game.state.run.tiles[${far.ids[0]}].soldiers += 7`); await h.wait(350);
+  say('growth float', await h.eval(`JSON.stringify(__game.effects.filter(e => e.kind === 'float').map(e => e.text))`) + ' pops=' + await h.eval(`__game.effects.filter(e => e.kind === 'pop').length`));
+  await h.shot(`${SP}/s4d_growth.png`);
   say('far attack (resolved)', await h.eval(`(() => { const run = __game.state.run, t = run.tiles[${far.targetId}]; return 'owner=' + t.owner + ' soldiers=' + Math.floor(t.soldiers) + ' battle=' + !!t.battle + ' cap=' + Math.floor(run.tiles[${far.ids[0]}].soldiers) + ' second=' + Math.floor(run.tiles[${far.ids[1]}].soldiers); })()`));
   await h.click(mb2[0], mb2[1]); // 다중 모드 끄기
   // 백그라운드 복귀 정산: hidden 상태를 흉내 내고 20분 뒤에 돌아온 것으로

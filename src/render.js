@@ -32,6 +32,8 @@ export function loadAssets(base = 'assets/') {
 export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null, effects = [], images = {}, marks = {} } = {}) {
   const run = state.run;
   const size = HEX_SIZE * cam.scale;
+  const pop = {}; // 타일 id → 숫자 확대 배율 (병사 수가 바뀐 직후 튀었다가 돌아온다)
+  for (const e of effects) if (e.kind === 'pop') pop[e.toId] = Math.max(pop[e.toId] || 1, 1 + 0.45 * (1 - e.t));
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#1b2430'; ctx.fillRect(0, 0, W, H);
   for (const t of run.tiles) {
@@ -55,7 +57,7 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
     if (selectedIds.includes(t.id) || t.id === inspectId) { ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke(); }
     if (size >= 14) {
       ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
-      ctx.font = `bold ${Math.round(size * 0.5)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `bold ${Math.round(size * 0.5 * (pop[t.id] || 1))}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const label = String(Math.floor(t.soldiers));
       ctx.strokeText(label, cx, cy + size * 0.05); ctx.fillText(label, cx, cy + size * 0.05);
       if (t.battle && size >= 20) {
@@ -87,7 +89,17 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
   }
   for (const e of effects) {
     const a = run.tiles[e.fromId], b = run.tiles[e.toId];
-    if (!a || !b) continue;
+    if (!b) continue;
+    if (e.kind === 'pop') continue;
+    if (e.kind === 'float') {
+      if (size < 14) continue;
+      const [bx, by] = worldToScreen(cam, W, H, ...hexToPixel(b.q, b.r, HEX_SIZE));
+      ctx.font = `bold ${Math.round(size * 0.36)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.globalAlpha = 1 - e.t * e.t; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.fillStyle = e.color;
+      const fy = by - size * (0.35 + e.t * 0.7);
+      ctx.strokeText(e.text, bx, fy); ctx.fillText(e.text, bx, fy); ctx.globalAlpha = 1;
+      continue;
+    }
     if (e.kind === 'ring') {
       const [bx, by] = worldToScreen(cam, W, H, ...hexToPixel(b.q, b.r, HEX_SIZE));
       // 점령 연출: 새 주인 색의 고리가 퍼지며 사라진다
@@ -95,6 +107,7 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
       ctx.strokeStyle = e.color; ctx.globalAlpha = 1 - e.t; ctx.lineWidth = Math.max(2, size * 0.1); ctx.stroke(); ctx.globalAlpha = 1;
       continue;
     }
+    if (!a) continue;
     // 경로(path: 타일 id 배열)가 있으면 그 길을 따라, 없으면 출발→도착 직선으로 점이 움직인다
     const ids = e.path && e.path.length > 1 ? e.path : [e.fromId, e.toId];
     const f = e.t * (ids.length - 1), k = Math.min(ids.length - 2, Math.floor(f)), u = f - k;
