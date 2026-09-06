@@ -26,10 +26,16 @@ export function pointsFor(state, outcome) {
   }
   return Math.max(1, Math.floor(run.maxTilesOwned / 4));
 }
-export function rebirth(state, outcome, seed) {
+export function rebirth(state, outcome, seed, mapKey = state.legacy.mapPref || state.run.map || 'hex') {
   const pts = pointsFor(state, outcome);
   state.legacy.points += pts;
   state.legacy.prestigeCount += 1;
-  state.run = generateRun(seed, state.legacy.prestigeCount, state.legacy.upgrades);
+  state.legacy.mapPref = mapKey;
+  state.run = generateRun(seed, state.legacy.prestigeCount, state.legacy.upgrades, mapKey);
   return pts;
+}
+// 이번 판을 버리고 다른 지도로 새로 시작 (유산은 그대로, 포인트 없음)
+export function restartOn(state, mapKey, seed) {
+  state.legacy.mapPref = mapKey;
+  state.run = generateRun(seed, state.legacy.prestigeCount, state.legacy.upgrades, mapKey);
 }

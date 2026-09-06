@@ -9,3 +9,8 @@
 - hill.png ← PNG/Tiles/Terrain/Grass/grass_16.png
 - mountain.png ← PNG/Tiles/Terrain/Grass/grass_14.png
 - citadel.png ← PNG/Tiles/Medieval/medieval_largeCastle.png
+
+## 지도 데이터 (src/maps/*.js, tools/build_maps.mjs 로 생성)
+- 대한민국 시·도 경계: southkorea/southkorea-maps (통계청 2013 행정구역, 공유·변형 자유) https://github.com/southkorea/southkorea-maps
+- 서울특별시 자치구 경계: southkorea/seoul-maps (Apache 2.0) https://github.com/southkorea/seoul-maps
+- 게임용으로 단순화·정규화했고 235km² 미만 섬과 울릉도·독도는 격자에 잡히지 않아 뺐다.

@@ -6,7 +6,7 @@ function memStorage() { const m = new Map(); return { getItem: k => (m.has(k) ? 
 
 test('새 상태는 유산 0, 반지름 3 판', () => {
   const s = newState(9);
-  assert.equal(s.version, 1);
+  assert.equal(s.version, 2);
   assert.equal(s.legacy.points, 0);
   assert.equal(s.run.tiles.length, 37);
 });
@@ -16,6 +16,12 @@ test('직렬화 왕복, lastSave 기록', () => {
   const text = serialize(s, 1234);
   assert.equal(s.lastSave, 1234);
   assert.deepEqual(deserialize(text), s);
+});
+
+test('v1 저장은 육각 평원으로 이관', () => {
+  const s = newState(9); s.version = 1; delete s.run.map; delete s.legacy.mapPref;
+  const m = deserialize(JSON.stringify(s));
+  assert.equal(m.version, 2); assert.equal(m.run.map, 'hex'); assert.equal(m.legacy.mapPref, 'hex');
 });
 
 test('깨진 텍스트·다른 버전은 null', () => {

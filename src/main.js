@@ -2,9 +2,11 @@ import { PLAYER, TERRAIN } from './world.js';
 import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener } from './sim.js';
 import { runAi } from './ai.js';
 import { simulateOffline } from './offline.js';
-import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth } from './prestige.js';
+import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn } from './prestige.js';
 import { newState, save, load, serialize, deserialize, SAVE_KEY } from './save.js';
-import { createCamera, draw, pickTile, loadAssets, HEX_SIZE, FACTION_COLORS, ownerColor } from './render.js';
+import { createCamera, draw, pickTile, loadAssets, worldBounds, FACTION_COLORS, ownerColor } from './render.js';
+import { MAPS, DEFAULT_MAP } from './mapgen.js';
+import { regionHolders } from './sim.js';
 import { updateTop, updatePanel, upgradePlan, setRatioButtons, setHint, flashHint, bindButtons, showModal, hideModal, isModalOpen, attachCanvasInput, formatNum } from './ui.js';
 
 const TICK = 0.25, AUTOSAVE = 5, RESUME_MIN = 30;
@@ -12,7 +14,7 @@ const HINT_DEFAULT = '내 땅 탭 → 목적지 탭 (이어진 먼 땅도 됨). 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const cam = createCamera();
-let state = load() || newState();
+let state = load() || newState(Date.now() >>> 0, DEFAULT_MAP);
 let images = {}, effects = [], acc = 0, saveAcc = 0, last = performance.now(), W = 0, H = 0, ended = false, hiddenAt = 0;
 let sel = [], inspectId = null, multi = false; // sel: 선택한 내 땅 id 목록, inspectId: 남의 땅 정보 보기
 // 병사 수 변화 연출: 타일마다 마지막 정수값·아직 안 띄운 증가분·마지막 표시 시각
@@ -43,12 +45,11 @@ function resize() {
   canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
-// 지도 전체가 화면에 들어오도록 중심(0,0)에 맞추고 배율을 정한다
+// 지도 전체(타일 경계)가 화면에 들어오도록 중심과 배율을 정한다
 function centerOnCapital() {
-  const R = state.run.radius;
-  const mapW = Math.sqrt(3) * HEX_SIZE * (2 * R + 1), mapH = 1.5 * HEX_SIZE * (2 * R + 1) + HEX_SIZE * 0.5;
-  cam.x = 0; cam.y = 0;
-  cam.scale = Math.max(0.4, Math.min(2.5, Math.min((W - 16) / mapW, (H - 16) / mapH)));
+  const [x0, y0, x1, y1] = worldBounds(state.run);
+  cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2;
+  cam.scale = Math.max(0.4, Math.min(2.5, Math.min((W - 16) / (x1 - x0), (H - 16) / (y1 - y0))));
 }
 function tilesOf(ids) { return ids.map(id => state.run.tiles[id]).filter(t => t && t.owner === PLAYER); }
 function refresh() {
@@ -66,7 +67,24 @@ setSendListener(r => {
   if (r.type === 'capture') effects.push({ kind: 'ring', fromId: r.fromId, toId: r.toId, t: 0, color: ownerColor(r.owner), speed: 1 / 0.6 });
   if (r.type === 'repel' && r.owner === PLAYER) flashHint(`공격 실패 · 수비 ${Math.floor(r.defendersLeft)}명 남음`);
   if (r.type === 'capture' && r.prevOwner === PLAYER) flashHint(`${state.run.tiles[r.toId] ? TERRAIN[state.run.tiles[r.toId].terrain].name : '땅'}을 ${r.owner === PLAYER ? '' : 'AI ' + r.owner + '에게 '}빼앗겼습니다`);
+  if (r.type === 'capture' && r.owner === PLAYER && state.run.regions) {
+    // 이 점령으로 지역이 완성됐으면 알림
+    const t = state.run.tiles[r.toId];
+    if (t && t.region >= 0 && regionHolders(state.run)[t.region] === PLAYER) flashHint(`★ ${state.run.regions[t.region]} 완전 점령! 지역 생산 +50%`, 3000);
+  }
 });
+
+// 지도 고르기 창. onPick(mapKey)
+function mapPickerHtml(current) {
+  return Object.values(MAPS).map(m => `<label class="map-row"><input type="radio" name="map" value="${m.key}" ${m.key === current ? 'checked' : ''}> <b>${m.name}</b><span class="desc">${m.desc}${m.homeName ? ` · 내 수도 ${m.homeName}` : ''}</span></label>`).join('');
+}
+function pickedMap() { const el = document.querySelector('input[name="map"]:checked'); return el ? el.value : state.run.map; }
+function openMapChange() {
+  showModal({ title: '지도 바꾸기', html: `<p>이번 판은 버리고 고른 지도에서 새로 시작합니다 (유산·환생 기록은 그대로, 포인트는 없음).</p>${mapPickerHtml(state.run.map)}`,
+    actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => {
+      restartOn(state, pickedMap(), Date.now() >>> 0); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); hideModal(); refresh();
+    } }] });
+}
 
 function order(toId) {
   const to = state.run.tiles[toId];
@@ -99,11 +117,13 @@ function openMenu() {
   showModal({
     title: '메뉴',
     html: `<p>유산 포인트 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회</p>
+      <p>지도: ${(MAPS[state.run.map] || MAPS.hex).name} <button data-action="map">지도 바꾸기</button></p>
       <p><button data-action="shop">유산 상점</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
       <p><button data-action="reset" style="color:#eb5757">처음부터(전부 삭제)</button></p>`,
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
     onBodyClick: a => {
       if (a === 'shop') openShop();
+      if (a === 'map') openMapChange();
       if (a === 'export') showModal({ title: '저장 내보내기', html: `<textarea readonly>${serialize(state)}</textarea><p>전체 선택해서 복사하세요.</p>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
       if (a === 'import') showModal({ title: '저장 가져오기', html: `<textarea id="import-text" placeholder="붙여넣기"></textarea><p id="import-msg"></p>`, actions: [
         { label: '취소', onClick: hideModal },
@@ -139,8 +159,8 @@ function checkEnd() {
   const pts = pointsFor(state, st);
   showModal({
     title: st === 'conquered' ? '🎉 지도 정복!' : '💀 전멸…',
-    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b></p><p>환생하면 지도가 초기화되고 유산 상점에서 영구 보너스를 살 수 있습니다.</p>`,
-    actions: [{ label: '환생', primary: true, onClick: () => { rebirth(state, st, Date.now() >>> 0); clearSel(); ended = false; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
+    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b></p><p>환생하면 지도가 초기화되고 유산 상점에서 영구 보너스를 살 수 있습니다.</p><p>다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
+    actions: [{ label: '환생', primary: true, onClick: () => { rebirth(state, st, Date.now() >>> 0, pickedMap()); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
   });
 }
 

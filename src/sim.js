@@ -23,11 +23,37 @@ export function soldierMul(state, f) {
 }
 export function attackMul(state, f) { return f === PLAYER ? 1 + 0.05 * (state.legacy.upgrades.attack || 0) : 1; }
 export function cap(tile) { return 20 * tile.level * TERRAIN[tile.terrain].cap; }
-export function goldRate(state, tile) { return 0.5 * TERRAIN[tile.terrain].gold * tile.level * prodMul(state, tile.owner); }
-export function soldierRate(state, tile) { return 0.12 * tile.level * soldierMul(state, tile.owner); }
+// 지역(구·시도) 완전 점령: 한 지역의 타일을 전부 가진 세력은 그 지역 타일의 골드·병사 생산 +50%
+// 타일이 1개뿐인 지역은 제외 (37타일 대한민국에서 대전·광주 같은 1칸 지역을 먹자마자 +50%가 붙어 AI끼리 30분 독식이 났음)
+export const REGION_BONUS = 0.5, REGION_MIN_TILES = 2;
+// 지역 번호 → 그 지역 타일을 전부 가진 세력. 주인이 섞여 있거나 타일이 1개면 null. 지역이 없는 지도면 null
+export function regionHolders(run) {
+  if (!run.regions) return null;
+  const h = [], n = [];
+  for (const t of run.tiles) {
+    if (!(t.region >= 0)) continue;
+    n[t.region] = (n[t.region] || 0) + 1;
+    if (h[t.region] === undefined) h[t.region] = t.owner; else if (h[t.region] !== t.owner) h[t.region] = null;
+  }
+  for (let i = 0; i < h.length; i++) if (n[i] < REGION_MIN_TILES) h[i] = null;
+  return h;
+}
+// 보너스 대상이 되는(타일 2개 이상) 지역 수
+export function regionCount(run) {
+  if (!run.regions) return 0;
+  const n = []; for (const t of run.tiles) if (t.region >= 0) n[t.region] = (n[t.region] || 0) + 1;
+  return n.filter(c => c >= REGION_MIN_TILES).length;
+}
+export function regionMul(run, tile, holders = regionHolders(run)) {
+  return holders && tile.owner !== NEUTRAL && tile.region >= 0 && holders[tile.region] === tile.owner ? 1 + REGION_BONUS : 1;
+}
+export function heldRegions(run, f) { const h = regionHolders(run); return h ? h.filter(o => o === f).length : 0; }
+export function goldRate(state, tile, holders) { return 0.5 * TERRAIN[tile.terrain].gold * tile.level * prodMul(state, tile.owner) * regionMul(state.run, tile, holders); }
+export function soldierRate(state, tile, holders) { return 0.12 * tile.level * soldierMul(state, tile.owner) * regionMul(state.run, tile, holders); }
 export function upgradeCost(tile) { return 40 * Math.pow(1.7, tile.level - 1) * TERRAIN[tile.terrain].gold; }
 export function factionGoldRate(state, f) {
-  return state.run.tiles.filter(t => t.owner === f).reduce((s, t) => s + goldRate(state, t), 0);
+  const holders = regionHolders(state.run);
+  return state.run.tiles.filter(t => t.owner === f).reduce((s, t) => s + goldRate(state, t, holders), 0);
 }
 export function tilesOwned(state, f) { return state.run.tiles.filter(t => t.owner === f).length; }
 export function updateMaxTiles(state) {
@@ -37,12 +63,13 @@ export function updateMaxTiles(state) {
 
 export function tick(state, dt) {
   const run = state.run;
+  const holders = regionHolders(run); // 틱마다 한 번만 계산
   for (const t of run.tiles) {
     if (t.owner === NEUTRAL) continue;
-    run.gold[t.owner] += goldRate(state, t) * dt;
+    run.gold[t.owner] += goldRate(state, t, holders) * dt;
     if (t.battle) continue; // 전투 중인 타일은 징집이 멈춘다 (생산이 계속되면 양쪽이 증원을 붓는 소모전이 끝없이 늘어짐)
     const c = cap(t);
-    if (t.soldiers < c) t.soldiers = Math.min(c, t.soldiers + soldierRate(state, t) * dt);
+    if (t.soldiers < c) t.soldiers = Math.min(c, t.soldiers + soldierRate(state, t, holders) * dt);
   }
   runBattles(state, dt);
   run.elapsed += dt;

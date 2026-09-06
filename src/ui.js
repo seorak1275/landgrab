@@ -1,6 +1,7 @@
 import { TERRAIN, PLAYER, NEUTRAL } from './world.js';
-import { cap, goldRate, soldierRate, upgradeCost, MAX_LEVEL } from './sim.js';
+import { cap, goldRate, soldierRate, upgradeCost, MAX_LEVEL, regionHolders, heldRegions, regionCount, REGION_BONUS } from './sim.js';
 import { ownerColor } from './render.js';
+import { MAPS } from './mapgen.js';
 
 export function formatNum(n) {
   n = Math.floor(n);
@@ -48,11 +49,23 @@ export function updatePanel(state, { selected = [], inspect = null, multi = fals
     return;
   }
   const tile = selected[0] || inspect;
-  if (!tile) { setText('p-title', '타일을 탭하세요'); setText('p-stats', ''); setBtn(true, '업그레이드'); return; }
+  const run = state.run;
+  if (!tile) {
+    const map = MAPS[run.map] || MAPS.hex;
+    setText('p-title', `${map.name} · 타일을 탭하세요`);
+    setText('p-stats', run.regions ? `★ 완전 점령 지역 ${heldRegions(run, PLAYER)} / ${regionCount(run)}
+한 지역(${run.map === 'seoul' ? '구' : '시·도'})을 전부 가지면 그 지역 생산 +${Math.round(REGION_BONUS * 100)}% (2칸 이상인 지역만)` : '');
+    setBtn(true, '업그레이드'); return;
+  }
   const tr = TERRAIN[tile.terrain];
-  setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}`);
+  const regionName = run.regions && tile.region >= 0 ? run.regions[tile.region] + ' · ' : '';
+  setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${regionName}${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}`);
   const mine = tile.owner === PLAYER;
   const lines = [`병사 ${Math.floor(tile.soldiers)} / ${Math.floor(cap(tile))}`, `방어 +${Math.round(tr.def * 100)}%`];
+  if (run.regions && tile.region >= 0) {
+    const h = regionHolders(run)[tile.region];
+    if (h !== null && h !== undefined && h !== NEUTRAL) lines.push(`★ ${run.regions[tile.region]} 완전 점령 (${ownerName(h)}) · 생산 +${Math.round(REGION_BONUS * 100)}%`);
+  }
   if (tile.battle) lines.push(`⚔ 전투 중: ${ownerName(tile.battle.attacker)} 공격 ${Math.floor(tile.battle.attackers)} vs 수비 ${Math.floor(tile.soldiers)} · 병사를 더 보내면 합류`);
   if (mine) lines.push(`생산 골드 ${goldRate(state, tile).toFixed(2)}/초 · 병사 ${soldierRate(state, tile).toFixed(2)}/초`);
   else lines.push(`점령하려면 ${Math.floor(tile.soldiers * (1 + tr.def)) + 1}명 넘게 보내야 함`);

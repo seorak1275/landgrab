@@ -1,13 +1,17 @@
-import { hexToPixel, hexCorners, pixelToHex } from './hex.js';
+import { hexToPixel, hexCorners, pixelToHex, DIRS, key } from './hex.js';
 import { NEUTRAL } from './world.js';
+import { MAPS } from './mapgen.js';
+import { regionHolders } from './sim.js';
 
 export const HEX_SIZE = 36;
 export const FACTION_COLORS = ['#2f80ed', '#eb5757', '#f2c94c', '#9b51e0', '#27ae60'];
 export const NEUTRAL_COLOR = '#777';
 const MARK_FILL = { win: 'rgba(111,227,143,0.35)', lose: 'rgba(255,123,123,0.3)', move: 'rgba(47,128,237,0.3)' };
-const TERRAIN_FILL = { plain: '#a8d08d', forest: '#5b8c5a', hill: '#c9a66b', mountain: '#8c8c8c', citadel: '#d9b382' };
-// 에셋 작업에서 실제 파일명으로 채움. 파일이 없으면 단색 육각형으로 그린다.
+const TERRAIN_FILL = { plain: '#a8d08d', forest: '#5b8c5a', hill: '#c9a66b', mountain: '#8c8c8c', citadel: '#d9b382', sea: '#2d5f8f' };
+// 에셋 작업에서 실제 파일명으로 채움. 파일이 없으면 단색 육각형으로 그린다 (뱃길은 그림 없이 바다색)
 export const ASSET_FILES = { plain: 'plain.png', forest: 'forest.png', hill: 'hill.png', mountain: 'mountain.png', citadel: 'citadel.png' };
+// 육각 변 i(꼭짓점 i→i+1, -30°부터 시계 방향)와 맞닿는 이웃의 DIRS 번호: 동, 남동, 남서, 서, 북서, 북동
+const EDGE_DIR = [0, 5, 4, 3, 2, 1];
 
 export function createCamera() { return { x: 0, y: 0, scale: 1 }; }
 export function worldToScreen(cam, W, H, wx, wy) { return [(wx - cam.x) * cam.scale + W / 2, (wy - cam.y) * cam.scale + H / 2]; }
@@ -18,6 +22,12 @@ export function pickTile(run, cam, W, H, sx, sy) {
   return run.tiles.find(t => t.q === q && t.r === r) || null;
 }
 export function ownerColor(owner) { return owner === NEUTRAL ? NEUTRAL_COLOR : FACTION_COLORS[owner % FACTION_COLORS.length]; }
+// 타일 전체의 월드 픽셀 경계 [minX, minY, maxX, maxY] (지도 전체 보기용)
+export function worldBounds(run) {
+  const b = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const t of run.tiles) { const [x, y] = hexToPixel(t.q, t.r, HEX_SIZE); b[0] = Math.min(b[0], x - HEX_SIZE); b[1] = Math.min(b[1], y - HEX_SIZE); b[2] = Math.max(b[2], x + HEX_SIZE); b[3] = Math.max(b[3], y + HEX_SIZE); }
+  return b;
+}
 
 export function loadAssets(base = 'assets/') {
   const images = {};
@@ -29,13 +39,51 @@ export function loadAssets(base = 'assets/') {
   }))).then(() => images);
 }
 
+// 판마다 한 번: 타일 색인, 지역별 이름표 놓을 타일(지역 타일들의 무게중심에 가장 가까운 타일)
+const layoutCache = new WeakMap();
+function layoutOf(run) {
+  let l = layoutCache.get(run.tiles);
+  if (l) return l;
+  const index = new Map(run.tiles.map(t => [key(t.q, t.r), t]));
+  const labels = [];
+  if (run.regions) {
+    const groups = new Map();
+    for (const t of run.tiles) if (t.region >= 0) (groups.get(t.region) || groups.set(t.region, []).get(t.region)).push(t);
+    for (const [region, ts] of groups) {
+      let cx = 0, cy = 0; for (const t of ts) { const [x, y] = hexToPixel(t.q, t.r, HEX_SIZE); cx += x / ts.length; cy += y / ts.length; }
+      const at = ts.reduce((a, b) => { const [ax, ay] = hexToPixel(a.q, a.r, HEX_SIZE), [bx, by] = hexToPixel(b.q, b.r, HEX_SIZE); return (bx - cx) ** 2 + (by - cy) ** 2 < (ax - cx) ** 2 + (ay - cy) ** 2 ? b : a; });
+      labels.push({ region, name: run.regions[region], tileId: at.id, count: ts.length });
+    }
+  }
+  l = { index, labels }; layoutCache.set(run.tiles, l);
+  return l;
+}
+
+// 실제 지도의 행정구역 윤곽을 육각 밑에 깔아 지도 모양이 드러나게
+function drawOutline(ctx, run, cam, W, H) {
+  const map = MAPS[run.map];
+  if (!map || !map.regions || !run.cell) return;
+  const k = HEX_SIZE / run.cell; // 지도 단위 → 월드 픽셀
+  ctx.beginPath();
+  for (const r of map.regions) for (const p of r.polys) {
+    p.forEach(([x, y], i) => { const [sx, sy] = worldToScreen(cam, W, H, (x - map.width / 2) * k, (y - map.height / 2) * k); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+    ctx.closePath();
+  }
+  ctx.fillStyle = '#2a3846'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
 export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null, effects = [], images = {}, marks = {} } = {}) {
   const run = state.run;
   const size = HEX_SIZE * cam.scale;
   const pop = {}; // 타일 id → 숫자 확대 배율 (병사 수가 바뀐 직후 튀었다가 돌아온다)
   for (const e of effects) if (e.kind === 'pop') pop[e.toId] = Math.max(pop[e.toId] || 1, 1 + 0.45 * (1 - e.t));
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#1b2430'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = run.regions ? '#17242f' : '#1b2430'; ctx.fillRect(0, 0, W, H);
+  drawOutline(ctx, run, cam, W, H);
+  const { index, labels } = layoutOf(run);
+  const holders = run.regions ? regionHolders(run) : null;
+  const edges = []; // 지역 경계 선분 (육각을 다 그린 뒤 위에 얹는다)
   for (const t of run.tiles) {
     const [wx, wy] = hexToPixel(t.q, t.r, HEX_SIZE);
     const [cx, cy] = worldToScreen(cam, W, H, wx, wy);
@@ -50,11 +98,23 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
       ctx.drawImage(img, cx - iw / 2, cy - ih / 2, iw, ih);
       ctx.restore();
     } else { ctx.fillStyle = TERRAIN_FILL[t.terrain]; ctx.fill(); }
+    if (t.terrain === 'sea' && size >= 14) { // 뱃길: 물결 두 줄
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = Math.max(1, size * 0.05);
+      for (const dy of [-0.32, 0.36]) { ctx.beginPath(); for (let i = 0; i <= 8; i++) { const x = cx - size * 0.5 + size * i / 8, y = cy + size * dy + Math.sin(i * Math.PI / 2) * size * 0.06; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke(); }
+      ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath();
+    }
     const mark = marks[t.id];
     if (mark) { ctx.fillStyle = MARK_FILL[mark]; ctx.fill(); }
     ctx.lineWidth = t.owner === NEUTRAL ? 1 : Math.max(2, size * 0.12);
     ctx.strokeStyle = ownerColor(t.owner); ctx.stroke();
     if (selectedIds.includes(t.id) || t.id === inspectId) { ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke(); }
+    if (run.regions && t.region >= 0) {
+      const full = hexCorners(cx, cy, size);
+      for (let i = 0; i < 6; i++) {
+        const [dq, dr] = DIRS[EDGE_DIR[i]], n = index.get(key(t.q + dq, t.r + dr));
+        if (!n || n.region !== t.region) edges.push([full[i], full[(i + 1) % 6]]);
+      }
+    }
     if (size >= 14) {
       ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
       ctx.font = `bold ${Math.round(size * 0.5 * (pop[t.id] || 1))}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -85,6 +145,29 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
         const sym = mark === 'win' ? '✓' : '✕';
         ctx.strokeText(sym, cx, cy - size * 0.5); ctx.fillText(sym, cx, cy - size * 0.5);
       }
+    }
+  }
+  if (edges.length) {
+    // 지역(구·시도) 경계: 소유자 테두리 위에 밝은 실선
+    ctx.beginPath(); for (const [a, b] of edges) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = Math.max(1.5, size * 0.06); ctx.lineCap = 'round'; ctx.stroke();
+  }
+  if (size >= 22) {
+    // 지역 이름표: 지역 가운데 타일 위쪽. 한 세력이 다 가졌으면 그 색으로 ★
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    const fs = Math.round(size * 0.24);
+    ctx.font = `bold ${fs}px system-ui, sans-serif`;
+    for (const l of labels) {
+      const t = run.tiles[l.tileId];
+      const [cx, cy] = worldToScreen(cam, W, H, ...hexToPixel(t.q, t.r, HEX_SIZE));
+      if (cx < -size || cy < -size || cx > W + size || cy > H + size) continue;
+      const holder = holders && holders[l.region];
+      const held = holder !== null && holder !== undefined && holder !== NEUTRAL;
+      const text = held ? `★${l.name}` : l.name, y = cy - size * 0.8;
+      const w = ctx.measureText(text).width + fs * 0.6;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.beginPath(); ctx.roundRect(cx - w / 2, y - fs * 0.62, w, fs * 1.24, fs * 0.5); ctx.fill();
+      ctx.fillStyle = held ? ownerColor(holder) : '#fff';
+      ctx.fillText(text, cx, y);
     }
   }
   for (const e of effects) {
