@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" href="assets/icon-180.png">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1b2430">
+<title>땅따먹기 · 사단전</title>
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="style.css">
+<style>
+  #top span { font-size: 13px; }
+  .act-row { display: flex; gap: 4px; margin-top: 6px; align-items: center; }
+  .act-row .lab { flex: 0 0 62px; font-size: 12px; color: #bbb; }
+  .act-row button { flex: 1; padding: 7px 2px; border-radius: 8px; border: 1px solid #555; background: none; color: #ddd; font-size: 12px; }
+  .act-row button:disabled { color: #666; }
+  .act-row button.danger { border-color: #eb5757; color: #ff9c9c; }
+  .act-row[hidden] { display: none; }
+  #p-stats { min-height: 30px; }
+</style>
+</head>
+<body>
+<header id="top">
+  <span id="top-pool">👥 0</span>
+  <span id="top-regions">🏳 1/230</span>
+  <span id="top-prestige">환생 0</span>
+  <span id="top-points">✨ 0</span>
+  <button id="btn-speed" type="button" title="배속">▶×1</button>
+  <button id="btn-menu" type="button">≡</button>
+</header>
+<div id="map">
+  <canvas id="canvas"></canvas>
+  <button id="btn-center" type="button" title="지도 전체 보기">⌖</button>
+</div>
+<section id="panel">
+  <div id="p-title">지역을 탭하세요</div>
+  <div id="p-stats"></div>
+  <div class="act-row" id="row-def" hidden><span class="lab">🛡 방어 배치</span>
+    <button data-act="def" data-n="10" type="button">+10</button><button data-act="def" data-n="100" type="button">+100</button><button data-act="def" data-n="500" type="button">+500</button><button data-act="def" data-n="max" type="button">최대</button></div>
+  <div class="act-row" id="row-div" hidden><span class="lab" id="lab-div">⚔ 사단 창설</span>
+    <button data-act="div" data-n="10" type="button">+10</button><button data-act="div" data-n="100" type="button">+100</button><button data-act="div" data-n="500" type="button">+500</button><button data-act="div" data-n="max" type="button">최대</button></div>
+  <div class="act-row" id="row-move" hidden><span class="lab">→ 파병 비율</span>
+    <div id="ratio"><button class="ratio-btn" data-r="0.25" type="button">25%</button><button class="ratio-btn active" data-r="0.5" type="button">50%</button><button class="ratio-btn" data-r="1" type="button">100%</button></div>
+    <span class="lab" style="flex:1;text-align:right">목적지 탭 → 이동/공격</span></div>
+  <div class="act-row" id="row-rebel" hidden><span class="lab">✊ 반란</span>
+    <button class="danger" data-act="rebel" data-n="10" type="button">10</button><button class="danger" data-act="rebel" data-n="100" type="button">100</button><button class="danger" data-act="rebel" data-n="500" type="button">500</button><button class="danger" data-act="rebel" data-n="max" type="button">최대</button></div>
+  <div id="hint"></div>
+</section>
+<div id="modal" hidden>
+  <div id="modal-box">
+    <h2 id="modal-title"></h2>
+    <div id="modal-body"></div>
+    <div id="modal-actions"></div>
+  </div>
+</div>
+<script type="module" src="src/region/main.js"></script>
+</body>
+</html>

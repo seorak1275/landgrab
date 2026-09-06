@@ -167,6 +167,7 @@ function openMenu() {
     title: '메뉴',
     html: `<p>유산 포인트 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회</p>
       <p>지도: ${(MAPS[state.run.map] || MAPS.hex).name} · 난이도 ${difficultyOf(state).name} <button data-action="map">지도·난이도 바꾸기</button></p>
+      <p><a href="region.html" style="color:#6fb1ff;font-weight:bold">🗺 새 모드: 대한민국 시·군·구 사단전 →</a></p>
       <p><button data-action="help">📖 도움말</button> <button data-action="shop">유산 상점</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
       <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드 (구분 잘 되는 색 + 타일에 주인 글자)</label></p>
       <p><button data-action="reset" style="color:#eb5757">처음부터(전부 삭제)</button></p>`,
@@ -249,6 +250,7 @@ function loop(now) {
 
 async function init() {
   resize(); window.addEventListener('resize', resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas); // 건물 줄 등으로 캔버스 높이가 바뀔 때
   images = await loadAssets('assets/');
   centerOnCapital();
   setRatioButtons(state.run.sendRatio);
