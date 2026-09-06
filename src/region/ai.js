@@ -1,5 +1,5 @@
 // 사단전 AI: 배치(국경 방어/내부 사단) → 공격 → 집결 → 반란 → 내부 사단 국경으로
-import { PLAYER, NEUTRAL, owned, neighbors, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, bfsOwn, pathTo, party } from './game.js';
+import { PLAYER, NEUTRAL, owned, neighbors, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, bfsOwn, pathTo, party, truce } from './game.js';
 import { perkOf } from '../perks.js';
 
 export function aiPeriod(state) { return 8 * (1 + 0.08 * ((state.legacy.upgrades || {}).aiSlow || 0)) * (perkOf(state).aiSlow || 1); }
@@ -13,20 +13,24 @@ export function aiAct(state, f) {
   const am = attackMul(state, f);
   const isBorder = r => neighbors(r.id).some(n => run.regions[n].owner !== f);
   const othersBattle = r => r.battle && !party(r, f);
+  const offLimits = r => truce(state) && r.owner === PLAYER; // 초반 휴전
 
   // 0. 반란 (REBEL_EVERY 주기마다, 배치 전에): 풀 합이 넉넉하면 플레이어(없으면 가장 약한 세력) 지역 중 수비가 가장 약한 곳에
   if (run.aiTurns[f] % REBEL_EVERY === 0 && totalPool(state, f) >= REBEL_MIN_POOL) {
-    const targets = run.regions.filter(r => r.owner !== f && r.owner !== NEUTRAL && canRebel(state, f, r.id) && !r.battle)
+    const targets = run.regions.filter(r => r.owner !== f && r.owner !== NEUTRAL && !offLimits(r) && canRebel(state, f, r.id) && !r.battle)
       .sort((a, b) => (a.owner === PLAYER ? 0 : 1) - (b.owner === PLAYER ? 0 : 1) || (a.def + a.div) - (b.def + b.div));
     const t = targets[0];
     if (t) { const n = Math.min(300, Math.floor(totalPool(state, f) * 0.5)); if (n * 0.7 * am > effectiveDefense(state, t, f) * 1.2) rebel(state, f, t.id, n); }
   }
 
-  // 1. 배치: 풀의 60%만 쓴다(나머지는 반란 자금으로 모음). 국경은 방어 절반·사단 절반, 내부는 전부 사단
-  for (const r of mine) {
-    const spend = Math.floor(r.pool * 0.6); if (spend < 10) continue;
-    if (isBorder(r)) { allocate(state, r.id, 'def', Math.floor(spend * 0.5)); allocate(state, r.id, 'div', Math.ceil(spend * 0.5)); }
-    else allocate(state, r.id, 'div', spend);
+  // 1. 배치: 세력 풀의 60%만 쓴다(나머지는 반란 자금). 절반은 방어가 약한 국경 지역(최대 5곳)에 방어, 절반은 사단이 가장 큰 국경 지역(없으면 수도)에 사단
+  const spend = Math.floor(run.pool[f] * 0.6);
+  if (spend >= 10) {
+    const border = mine.filter(isBorder).sort((a, b) => a.def - b.def);
+    const defTargets = border.slice(0, 5);
+    if (defTargets.length) { const each = Math.floor(spend * 0.5 / defTargets.length); for (const r of defTargets) allocate(state, r.id, 'def', each); }
+    const divAt = (border.length ? border.reduce((a, b) => (b.div > a.div ? b : a)) : mine[0]);
+    allocate(state, divAt.id, 'div', Math.floor(spend * 0.5));
   }
 
   // 2. 공격: 사단×공격 > 상대 수비×1.3 인 가장 약한 이웃(중립 먼저), 주기당 3회, 80%
@@ -35,7 +39,7 @@ export function aiAct(state, f) {
   for (const r of mine) {
     if (r.div < 20) continue;
     for (const n of neighbors(r.id)) {
-      const t = run.regions[n]; if (t.owner === f || othersBattle(t)) continue;
+      const t = run.regions[n]; if (t.owner === f || othersBattle(t) || offLimits(t)) continue;
       const D = effectiveDefense(state, t, f);
       if (r.div * 0.8 * am > D * 1.3) options.push({ r, t, D });
     }
@@ -53,8 +57,8 @@ export function aiAct(state, f) {
   if (attacks === 0 && run.aiTurns[f] % GATHER_EVERY === 0) {
     let best = null;
     for (const r of mine) for (const n of neighbors(r.id)) {
-      const t = run.regions[n]; if (t.owner === f || othersBattle(t)) continue;
-      const comp = [...bfsOwn(run, r.id).keys()];
+      const t = run.regions[n]; if (t.owner === f || othersBattle(t) || offLimits(t)) continue;
+      const comp = neighbors(t.id).filter(id => run.regions[id].owner === f); // 목표에 인접한 내 지역들
       const sum = comp.reduce((s, id) => s + run.regions[id].div * 0.6, 0);
       const D = effectiveDefense(state, t, f);
       if (sum * am > D * 1.5 && (!best || pri(t.owner) - pri(best.t.owner) < 0 || (pri(t.owner) === pri(best.t.owner) && D < best.D))) best = { t, D, comp };
@@ -62,14 +66,14 @@ export function aiAct(state, f) {
     if (best) for (const id of best.comp) if (run.regions[id].div >= 10) move(state, id, best.t.id, 0.6);
   }
 
-  // 5. 내부 지역의 사단은 가장 가까운 국경 지역으로 (한 주기에 3개까지)
+  // 5. 내부 지역의 사단은 가장 가까운 국경 쪽으로 한 칸 (한 주기에 3개까지, 이동은 인접만 가능)
   let moved = 0;
   for (const r of mine) {
     if (moved >= 3 || isBorder(r) || r.div < 20) continue;
     const parent = bfsOwn(run, r.id);
     let best = null;
     for (const id of parent.keys()) if (isBorder(run.regions[id])) { const p = pathTo(parent, id); if (!best || p.length < best.length) best = p; }
-    if (best && best.length > 1) { move(state, r.id, best[best.length - 1], 1); moved++; }
+    if (best && best.length > 1) { move(state, r.id, best[1], 1); moved++; }
   }
 }
 

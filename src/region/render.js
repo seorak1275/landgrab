@@ -1,5 +1,5 @@
 // 사단전 지도 그리기: 지역 다각형(주인 색), 경계, 뱃길, 라벨(이름·🛡방어·⚔사단·풀 막대), 행군 부대, 반란·전투 연출
-import { MAP, NEUTRAL, PLAYER, party, poolCap } from './game.js';
+import { MAP, NEUTRAL, PLAYER, party } from './game.js';
 import { FACTION_COLORS, NEUTRAL_COLOR, ownerColor, ownerTag, isColorblind, worldToScreen, screenToWorld } from '../render.js';
 import { pointInPoly } from '../mapgen.js';
 
@@ -74,11 +74,6 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
       ctx.font = `bold ${fs}px system-ui, sans-serif`;
       const txt = r.owner === NEUTRAL ? `🛡${Math.floor(r.def)}` : `🛡${Math.floor(r.def)} ⚔${Math.floor(r.div)}`;
       ctx.fillStyle = '#fff'; ctx.strokeText(txt, cx, y); ctx.fillText(txt, cx, y);
-      if (r.owner !== NEUTRAL && s >= 1.3) { // 풀 막대
-        const w = fs * 3.2, h = Math.max(2, fs * 0.22), yy = y + fs * 0.8;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(cx - w / 2, yy, w, h);
-        ctx.fillStyle = ownerColor(r.owner); ctx.fillRect(cx - w / 2, yy, w * Math.min(1, r.pool / poolCap(state, r.owner)), h);
-      }
       if (isColorblind() && r.owner !== NEUTRAL) { ctx.font = `bold ${fs * 0.8}px system-ui, sans-serif`; ctx.fillStyle = ownerColor(r.owner); ctx.strokeText(ownerTag(r.owner), cx + fs * 2.4, cy - fs * 0.7); ctx.fillText(ownerTag(r.owner), cx + fs * 2.4, cy - fs * 0.7); }
       if (r.battle && r.battle.parties.length) {
         const lead = r.battle.parties.reduce((a, b) => (b.size * b.am > a.size * a.am ? b : a));

@@ -234,8 +234,8 @@ function settle(elapsedSec) {
 function loop(now) {
   const dt = Math.min(1, (now - last) / 1000); last = now;
   if (!ended) {
-    acc += dt * (state.legacy.speed || 1); // 배속: 시뮬 시간만
-    while (acc >= TICK) { tick(state, TICK); runAi(state, TICK); acc -= TICK; }
+    let d = dt * (state.legacy.speed || 1); // 배속: 시뮬 시간만. 프레임마다 돌려 행군이 매끄럽게 (0.25초 넘으면 쪼갠다)
+    while (d > 0) { const st = Math.min(TICK, d); tick(state, st); runAi(state, st); d -= st; }
     trackGrowth(now / 1000);
     for (const e of effects) e.t += dt * (e.speed || 2.5);
     effects = effects.filter(e => e.t < 1);

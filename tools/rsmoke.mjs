@@ -11,10 +11,10 @@ export async function run(h) {
   const cp = JSON.parse(await h.eval(`(async () => { const { centerOf } = await import('./src/region/render.js'); const id = __game.state.run.regions.findIndex(r => r.owner === 0); const [wx, wy] = centerOf(id); const c = document.getElementById('canvas').getBoundingClientRect(), cam = __game.cam; return JSON.stringify([c.left + (wx - cam.x) * cam.scale + c.width / 2, c.top + (wy - cam.y) * cam.scale + c.height / 2, id]); })()`));
   await h.tap(cp[0], cp[1]);
   say('capital panel', await h.eval(`document.getElementById('p-title').textContent + ' | sel=' + __game.sel + ' | def hidden=' + document.getElementById('row-def').hidden`));
-  await h.eval(`__game.state.run.regions[${cp[2]}].pool = 300`); await h.wait(300);
+  await h.eval(`__game.state.run.pool[0] = 300`); await h.wait(300);
   await h.eval(`document.querySelector('[data-act="def"][data-n="100"]').click()`); await h.wait(100);
   await h.eval(`document.querySelector('[data-act="div"][data-n="max"]').click()`); await h.wait(300);
-  say('after allocate', await h.eval(`(() => { const r = __game.state.run.regions[${cp[2]}]; return 'def=' + Math.floor(r.def) + ' div=' + Math.floor(r.div) + ' pool=' + Math.floor(r.pool) + ' lab=' + document.getElementById('lab-div').textContent; })()`));
+  say('after allocate', await h.eval(`(() => { const r = __game.state.run.regions[${cp[2]}]; return 'def=' + Math.floor(r.def) + ' div=' + Math.floor(r.div) + ' pool=' + Math.floor(__game.state.run.pool[0]) + ' lab=' + document.getElementById('lab-div').textContent; })()`));
   await h.shot(`${SP}/r2_selected.png`);
   // 이웃 중립 공격: 가장 가까운 이웃 좌표 탭
   const np = JSON.parse(await h.eval(`(async () => { const { centerOf } = await import('./src/region/render.js'); const { neighbors } = await import('./src/region/game.js'); const run = __game.state.run; const n = neighbors(${cp[2]}).find(i => run.regions[i].owner === -1); run.regions[n].def = 5; const [wx, wy] = centerOf(n); const c = document.getElementById('canvas').getBoundingClientRect(), cam = __game.cam; return JSON.stringify([c.left + (wx - cam.x) * cam.scale + c.width / 2, c.top + (wy - cam.y) * cam.scale + c.height / 2, n]); })()`));
@@ -25,7 +25,7 @@ export async function run(h) {
   say('after battle', await h.eval(`(() => { const r = __game.state.run.regions[${np[2]}]; return 'owner=' + r.owner + ' div=' + Math.floor(r.div) + ' regions=' + document.getElementById('top-regions').textContent; })()`));
   await h.shot(`${SP}/r3_after_attack.png`);
   // 반란: AI 지역 조사 → 반란 100
-  const ap = JSON.parse(await h.eval(`(async () => { const { centerOf } = await import('./src/region/render.js'); const run = __game.state.run; const t = run.regions.find(r => r.owner === 1); t.def = 10; t.div = 10; run.regions[${cp[2]}].pool = 400; const [wx, wy] = centerOf(t.id); __game.cam.x = wx; __game.cam.y = wy; const c = document.getElementById('canvas').getBoundingClientRect(), cam = __game.cam; return JSON.stringify([c.left + c.width / 2, c.top + c.height / 2, t.id]); })()`));
+  const ap = JSON.parse(await h.eval(`(async () => { const { centerOf } = await import('./src/region/render.js'); const run = __game.state.run; const t = run.regions.find(r => r.owner === 1); t.def = 10; t.div = 10; run.pool[0] = 400; const [wx, wy] = centerOf(t.id); __game.cam.x = wx; __game.cam.y = wy; const c = document.getElementById('canvas').getBoundingClientRect(), cam = __game.cam; return JSON.stringify([c.left + c.width / 2, c.top + c.height / 2, t.id]); })()`));
   await h.wait(200); await h.tap(ap[0], ap[1]); await h.wait(200); await h.tap(ap[0], ap[1]); await h.wait(300);
   say('enemy panel', await h.eval(`document.getElementById('p-title').textContent + ' | rebel hidden=' + document.getElementById('row-rebel').hidden`));
   await h.eval(`document.querySelector('[data-act="rebel"][data-n="100"]').click()`); await h.wait(300);

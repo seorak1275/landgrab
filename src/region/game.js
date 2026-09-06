@@ -1,5 +1,5 @@
 // 사단전 모드 순수 시뮬 (docs/superpowers/specs/2026-09-06-region-division-mode.md)
-// 지역 = 칸. 지역마다 생산력 → 인력 풀(한도 500) → 방어인력 / 사단. 사단은 인접 그래프를 행군. 남의 지역엔 반란.
+// 지역 = 칸. 모든 내 지역의 생산력이 세력 하나의 인력 풀(run.pool[f], 한도 500)에 모이고 → 어느 지역이든 방어인력 / 사단으로 배치. 사단은 인접 그래프를 행군. 남의 지역엔 반란.
 import MAP from '../maps/sgg.js';
 import { mulberry32 } from '../rng.js';
 import { PERKS, perkOf } from '../perks.js';
@@ -15,6 +15,8 @@ export const TRAIT_DEF = { mountain: 1.5, city: 1.2, coast: 1.0, plain: 0.9 };
 export const TRAIT_NAME = { mountain: '⛰산악', city: '🏙도시', coast: '🌊해안', plain: '🌾평야' };
 export const AI_RAMP = 0.1, AI_RAMP_MAX = 1.0;
 export const HOME = '속초시'; // 설악산
+export const TRUCE = 360; // 시작 뒤 이 시간(초) 동안 AI는 플레이어 지역을 치거나 반란하지 않는다 (생산 4배 뒤로 6분 만에 전멸해서)
+export const truce = state => (state.run.elapsed || 0) < TRUCE;
 
 const lv = (state, k) => (state.legacy && state.legacy.upgrades && state.legacy.upgrades[k]) || 0;
 export function difficultyOf(state) { return DIFFICULTIES[state.legacy.difficulty] || DIFFICULTIES[DEFAULT_DIFFICULTY]; }
@@ -51,14 +53,16 @@ export function newRun(seed, legacy = {}, perk = null) {
   const garrisonMul = (1 - 0.04 * (up.garrison || 0)) * (pk.garrison || 1);
   const regions = MAP.regions.map((m, id) => {
     const f = capitals.indexOf(id);
-    if (f >= 0) return { id, owner: f, pool: 100 + (f === PLAYER ? 100 * (up.startGold || 0) + (pk.startGold || 0) : 0), def: 30, div: (50 + (f === PLAYER ? 20 * (up.startArmy || 0) : 0)) * (f === PLAYER ? (pk.startArmy || 1) : 1) };
-    return { id, owner: NEUTRAL, pool: 0, def: Math.round((15 + m.prod * 80) * (0.8 + rand() * 0.5) * garrisonMul), div: 0 };
+    if (f >= 0) return { id, owner: f, def: f === PLAYER ? 60 : 30, div: (f === PLAYER ? 80 + 20 * (up.startArmy || 0) : 50) * (f === PLAYER ? (pk.startArmy || 1) : 1) };
+    return { id, owner: NEUTRAL, def: Math.round((15 + m.prod * 20) * (0.8 + rand() * 0.5) * garrisonMul), div: 0 }; // 구 55·시 45·군 35 안팎
   });
-  return { seed, mode: 'region', factions, regions, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
+  const pool = Array(factions).fill(100); pool[PLAYER] = 300 + 100 * (up.startGold || 0) + (pk.startGold || 0);
+  return { seed, mode: 'region', factions, regions, pool, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
 }
 
 export function owned(state, f) { return state.run.regions.filter(r => r.owner === f); }
-export function totalPool(state, f) { return owned(state, f).reduce((s, r) => s + r.pool, 0); }
+export function totalPool(state, f) { return f === NEUTRAL ? 0 : (state.run.pool[f] || 0); }
+export function totalProd(state, f) { return owned(state, f).reduce((s, r) => s + (r.battle ? 0 : prodOf(state, r)), 0); }
 export function status(state) {
   const n = owned(state, PLAYER).length;
   if (n === 0) {
@@ -77,8 +81,8 @@ export function amountOf(n, avail) { const a = n === 'max' ? avail : Math.min(n,
 export function allocate(state, id, kind, n) {
   const r = state.run.regions[id];
   if (!r || r.owner === NEUTRAL) return 0;
-  const a = amountOf(n, r.pool); if (a < 1) return 0;
-  r.pool -= a; if (kind === 'def') r.def += a; else r.div += a;
+  const a = amountOf(n, state.run.pool[r.owner]); if (a < 1) return 0;
+  state.run.pool[r.owner] -= a; if (kind === 'def') r.def += a; else r.div += a;
   return a;
 }
 
@@ -122,8 +126,9 @@ function battleTick(state, r, dt) {
   for (const p of dead) emit({ type: 'repel', id: r.id, owner: p.owner, prevOwner: prev });
   if (b.parties.length === 1) {
     const w = b.parties[0];
-    const lootK = w.owner === PLAYER ? 0.5 + 0.1 * lv(state, 'loot') : 0.5;
-    r.owner = w.owner; r.def = 0; r.div = w.size; r.pool = Math.floor(r.pool * lootK);
+    const loot = 10 * (w.owner === PLAYER ? 1 + 0.5 * lv(state, 'loot') : 1); // 점령 보상: 풀에 +10 (유산 '약탈' +5/레벨)
+    r.owner = w.owner; r.def = 0; r.div = w.size;
+    state.run.pool[w.owner] = Math.min(poolCap(state, w.owner), state.run.pool[w.owner] + loot);
     for (const rb of state.run.rebels) if (rb.target === r.id && rb.owner === w.owner) rb.dead = true; // 내 반란은 취소
     state.run.rebels = state.run.rebels.filter(x => !x.dead);
     updateMax(state);
@@ -165,20 +170,13 @@ export function bfsOwn(run, from) {
   return parent;
 }
 export function pathTo(parent, id) { const p = []; for (let c = id; c !== -1 && c !== undefined; c = parent.get(c)) p.push(c); return p.reverse(); }
-// 사단 이동/공격: from의 사단에서 ratio만큼. 목적지가 내 지역이면 합류, 남의 지역이면 인접한 내 지역을 거쳐 진입
+// 사단 이동/공격: from의 사단에서 ratio만큼 **인접한** 지역으로만. 내 지역이면 합류, 남의 지역이면 전투
 export function move(state, from, to, ratio) {
   const run = state.run, f = run.regions[from], t = run.regions[to];
   if (!f || !t || f.owner === NEUTRAL || from === to) return { type: 'invalid' };
+  if (!neighbors(from).includes(to)) return { type: 'invalid' };
   const size = Math.floor(f.div * ratio); if (size < 1) return { type: 'invalid' };
-  const parent = bfsOwn(run, from);
-  let path;
-  if (t.owner === f.owner) { if (!parent.has(to)) return { type: 'invalid' }; path = pathTo(parent, to); }
-  else {
-    let best = null;
-    for (const n of neighbors(to)) if (parent.has(n)) { const p = pathTo(parent, n); if (!best || p.length < best.length) best = p; }
-    if (!best) return { type: 'invalid' };
-    path = [...best, to];
-  }
+  const path = [from, to];
   f.div -= size;
   const a = depart(state, f.owner, size, path);
   const res = { type: t.owner === f.owner ? 'move' : 'attack', size, from, to, owner: f.owner, eta: (path.length - 1) / a.speed };
@@ -191,13 +189,12 @@ export function predict(state, from, to, ratio) {
   return { win: size >= 1 && A > D, A, D };
 }
 
-// ---- 반란: 남의 지역에 내 풀(큰 곳부터)에서 n명을 보내 REBEL_DELAY초 뒤 REBEL_RATIO만큼 봉기 ----
+// ---- 반란: 남의 지역에 내 풀에서 n명을 보내 REBEL_DELAY초 뒤 REBEL_RATIO만큼 봉기 ----
 export function canRebel(state, f, id) { const r = state.run.regions[id]; return r && r.owner !== f && r.owner !== NEUTRAL && !state.run.rebels.some(x => x.owner === f && x.target === id); }
 export function rebel(state, f, id, n) {
   if (!canRebel(state, f, id)) return 0;
-  const mine = owned(state, f).sort((a, b) => b.pool - a.pool);
-  const a = amountOf(n, mine.reduce((s, r) => s + r.pool, 0)); if (a < 10) return 0;
-  let need = a; for (const r of mine) { const take = Math.min(r.pool, need); r.pool -= take; need -= take; if (need <= 0) break; }
+  const a = amountOf(n, state.run.pool[f]); if (a < 10) return 0;
+  state.run.pool[f] -= a;
   state.run.rebels.push({ owner: f, target: id, size: Math.round(a * REBEL_RATIO), eta: REBEL_DELAY, am: attackMul(state, f) });
   emit({ type: 'rebel', id, owner: f, size: a });
   return a;
@@ -215,10 +212,9 @@ export function runRebels(state, dt) {
 
 export function tick(state, dt) {
   const run = state.run;
-  for (const r of run.regions) {
-    if (r.owner === NEUTRAL || r.battle) continue; // 전투 중엔 생산 중지
-    const c = poolCap(state, r.owner);
-    if (r.pool < c) r.pool = Math.min(c, r.pool + prodOf(state, r) * dt);
+  for (let f = 0; f < run.factions; f++) { // 세력 풀 하나에 모든 지역 생산이 모인다 (전투 중인 지역은 제외), 한도까지만
+    const c = poolCap(state, f);
+    if (run.pool[f] < c) run.pool[f] = Math.min(c, run.pool[f] + totalProd(state, f) * dt);
   }
   runRebels(state, dt); runArmies(state, dt); runBattles(state, dt);
   run.elapsed += dt; updateMax(state);

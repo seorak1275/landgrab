@@ -1,5 +1,5 @@
 // 통계청 시군구 GeoJSON → 사단전 모드 지도 데이터(src/maps/sgg.js)
-// - 특별시·광역시는 구까지, 도(道)는 시·군까지 (일반시의 구는 시로 합친다: 수원시장안구+… → 수원시)
+// - 구가 있는 시(수원·성남·고양…)도 구까지 나눈다 (속초처럼 구가 없는 시는 시 그대로) → 251개
 // - 인접: 원본 좌표를 공유하는(꼭짓점 2개 이상) 지역끼리. 섬(이웃 없음)은 가장 가까운 지역과 잇는다
 // - 생산력(prod, 인력/초)과 특성(trait)은 유형·시도로 정한다
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,8 +9,8 @@ const PROV = { 11: '서울', 21: '부산', 22: '대구', 23: '인천', 24: '광�
 const METRO = new Set([11, 21, 22, 23, 24, 25, 26, 29]);
 const MOUNTAIN_PROV = new Set(['강원', '경북', '충북']);
 const PLAIN_PROV = new Set(['전북', '충남', '경기', '전남']);
-// 생산력(인력/초): 구 0.5, 시 0.4, 군 0.25 → 한도 500까지 17~33분
-const PROD = { 구: 0.5, 시: 0.4, 군: 0.25 };
+// 생산력(인력/초): 구 2, 시 1.5, 군 1 ("너무 적다"는 피드백으로 4배). 세력 풀 하나에 합쳐져 한도 500
+const PROD = { 구: 2, 시: 1.5, 군: 1 };
 
 async function fetchGeo() {
   mkdirSync('tools/geo', { recursive: true });
@@ -45,7 +45,7 @@ const groups = new Map(); // 이름 → { name, prov, type, rings(원본 투영)
 for (const ft of geo.features) {
   const code = Number(ft.properties.code), pv = Math.floor(code / 1000), prov = PROV[pv];
   let name = ft.properties.name;
-  if (!METRO.has(pv)) { const m = name.match(/^(.+?시)(.+구)$/); if (m) name = m[1]; }
+  const m = name.match(/^(.+?)시(.+구)$/); if (m && !METRO.has(pv)) name = `${m[1]} ${m[2]}`; // 수원시장안구 → 수원 장안구
   const type = name.endsWith('구') ? '구' : name.endsWith('군') ? '군' : '시';
   const key = `${prov}/${name}`;
   const rings = (ft.geometry.type === 'Polygon' ? [ft.geometry.coordinates] : ft.geometry.coordinates).map(pg => pg[0].map(proj));

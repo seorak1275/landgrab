@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, newRun, tick, status, owned, totalPool, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, neighbors, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO } from './game.js';
+import { MAP, PLAYER, NEUTRAL, newRun, tick, status, owned, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, neighbors, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO } from './game.js';
 import { runAi } from './ai.js';
 import { draw, pickRegion, bounds, centerOf } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -47,7 +47,7 @@ function setText(id, t) { if (lastText.get(id) !== t) { lastText.set(id, t); $(i
 function showRow(id, on) { const el = $(id); if (el.hidden === on) el.hidden = !on; }
 function refresh() {
   if (sel !== null && state.run.regions[sel].owner !== PLAYER) sel = null;
-  setText('top-pool', `👥 ${formatNum(totalPool(state, PLAYER))}`);
+  setText('top-pool', `👥 ${formatNum(totalPool(state, PLAYER))}/${Math.floor(poolCap(state, PLAYER))} (+${totalProd(state, PLAYER).toFixed(1)}/초)`);
   setText('top-regions', `🏳 ${owned(state, PLAYER).length}/${state.run.regions.length}`);
   setText('top-prestige', `환생 ${state.legacy.prestigeCount}`);
   setText('top-points', `✨ ${state.legacy.points}`);
@@ -55,14 +55,14 @@ function refresh() {
   if (id === null) {
     const perk = PERKS[state.run.perk];
     setText('p-title', '대한민국 시·군·구 · 지역을 탭하세요');
-    setText('p-stats', `AI ${state.run.factions - 1}세력과 230개 지역 다툼 · 난이도 ${difficultyOf(state).name}(AI 생산 ×${difficultyOf(state).mul}, 10분마다 +0.1)${perk ? `\n${perk.icon} 축복: ${perk.name} — ${perk.desc}` : ''}`);
+    setText('p-stats', `AI ${state.run.factions - 1}세력과 ${state.run.regions.length}개 지역 다툼 · 난이도 ${difficultyOf(state).name}(AI 생산 ×${difficultyOf(state).mul}, 10분마다 +0.1)${perk ? `\n${perk.icon} 축복: ${perk.name} — ${perk.desc}` : ''}`);
     for (const r of ['row-def', 'row-div', 'row-move', 'row-rebel']) showRow(r, false);
     return;
   }
   const r = state.run.regions[id], m = info(id), mine = r.owner === PLAYER;
   $('p-title').innerHTML = `<span style="color:${ownerColor(r.owner)}">■</span> ${m.p} ${m.n} · ${ownerName(r.owner)} · ${TRAIT_NAME[m.tr]}`;
   const lines = [`🛡 방어 ${Math.floor(r.def)} · ⚔ 사단 ${Math.floor(r.div)} · 수비 배율 ×${defMul(state, r).toFixed(2)}`];
-  if (r.owner !== NEUTRAL) lines.push(`👥 인력 ${Math.floor(r.pool)} / ${Math.floor(poolCap(state, r.owner))} · 생산 ${prodOf(state, r).toFixed(2)}/초 (${m.t})`);
+  if (r.owner !== NEUTRAL) lines.push(`생산력 ${prodOf(state, r).toFixed(2)}/초 (${m.t})${mine ? ` · 내 인력 ${Math.floor(totalPool(state, PLAYER))}/${Math.floor(poolCap(state, PLAYER))} (전 지역 합산 +${totalProd(state, PLAYER).toFixed(1)}/초)` : ''}`);
   else lines.push(`중립 · 생산력 ${m.prod}/초 (${m.t}) · 점령하려면 ${Math.floor(r.def * defMul(state, r)) + 1}명 넘게`);
   if (r.battle && r.battle.parties.length) lines.push(`⚔ ${r.battle.parties.length > 1 ? '난전' : '전투 중'}: ${r.battle.parties.map(p => `${ownerName(p.owner)} ${Math.floor(p.size)}`).join(' · ')} vs 수비 ${Math.floor((r.def + r.div))}`);
   const rb = state.run.rebels.filter(x => x.target === id);
@@ -73,7 +73,7 @@ function refresh() {
   showRow('row-rebel', !mine && canRebel(state, PLAYER, id));
   if (mine) {
     setText('lab-div', r.div >= 1 ? '⚔ 사단 증원' : '⚔ 사단 창설');
-    for (const b of document.querySelectorAll('[data-act="def"],[data-act="div"]')) b.disabled = r.pool < 1 || (b.dataset.n !== 'max' && r.pool < 1);
+    for (const b of document.querySelectorAll('[data-act="def"],[data-act="div"]')) b.disabled = totalPool(state, PLAYER) < 1;
   } else for (const b of document.querySelectorAll('[data-act="rebel"]')) b.disabled = totalPool(state, PLAYER) < 10;
 }
 
@@ -85,7 +85,7 @@ function onTap(sx, sy) {
   const r = state.run.regions[id];
   if (sel !== null && id !== sel) { // 파병
     const res = move(state, sel, id, state.run.sendRatio);
-    if (res.type === 'invalid') { if (r.owner === PLAYER) { sel = id; inspect = null; } else { flashHint(r.owner === PLAYER ? '' : '사단이 없거나 이어진 길이 없어요 (남의 지역엔 반란으로)'); inspect = id; sel = null; } }
+    if (res.type === 'invalid') { if (r.owner === PLAYER) { sel = id; inspect = null; } else { flashHint('사단이 없거나 인접하지 않아요 (인접한 지역으로만 이동, 먼 곳은 반란으로)'); inspect = id; sel = null; } }
     else flashHint(res.type === 'attack' ? `⚔ 출격 ${res.size}명 → ${info(id).n} · 약 ${res.eta.toFixed(0)}초` : `→ 이동 ${res.size}명 → ${info(id).n} · 약 ${res.eta.toFixed(0)}초`);
     refresh(); return;
   }
@@ -95,7 +95,7 @@ function onTap(sx, sy) {
 function onAct(act, n) {
   const id = sel !== null ? sel : inspect; if (id === null) return;
   const num = n === 'max' ? 'max' : Number(n);
-  if (act === 'def' || act === 'div') { const a = allocate(state, id, act, num); flashHint(a ? `${act === 'def' ? '🛡 방어' : '⚔ 사단'} +${a}` : '인력이 없어요'); }
+  if (act === 'def' || act === 'div') { const a = allocate(state, id, act, num); flashHint(a ? `${act === 'def' ? '🛡 방어' : '⚔ 사단'} +${a} · 남은 인력 ${Math.floor(totalPool(state, PLAYER))}` : '인력이 없어요'); }
   if (act === 'rebel') { const a = rebel(state, PLAYER, id, num); flashHint(a ? `✊ ${info(id).n}에 반란 ${a}명 투입 · ${REBEL_DELAY}초 뒤 ${Math.floor(a * REBEL_RATIO)}명 봉기` : '인력이 10명 이상 필요하거나 이미 진행 중'); }
   save(); refresh();
 }
@@ -116,9 +116,9 @@ function openShop(after = hideModal) {
 }
 function openHelp() {
   showModal({ title: '📖 사단전 도움말', html: `<div class="help">
-    <h3>지역과 인력</h3><p>대한민국 230개 시·군·구가 칸이다. 내 지역은 생산력(구 0.5·시 0.4·군 0.25/초 × 특성)만큼 <b>인력 풀</b>이 쌓인다(최대 500). 풀은 그 지역에서만 쓴다.</p>
+    <h3>지역과 인력</h3><p>대한민국 230개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 0.5·시 0.4·군 0.25/초)이 <b>하나의 인력 풀</b>(상단 👥, 최대 500)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려지니 계속 배치하자.</p>
     <h3>방어 배치 · 사단</h3><p>풀에서 🛡<b>방어인력</b>(그 지역 고정 수비)이나 ⚔<b>사단</b>(움직이는 부대, 지역당 하나, 인원 무제한)으로 옮긴다. +10/+100/+500/최대.</p>
-    <h3>파병</h3><p>내 지역 선택 → 목적지 탭. 파병 비율(25/50/100%)만큼 사단이 내 지역을 따라 행군(지역당 2초)해 내 지역이면 합류, 남의 지역이면 전투. 이어진 길이 없으면 못 간다 → 반란으로.</p>
+    <h3>파병</h3><p>내 지역 선택 → <b>인접한</b> 지역 탭. 파병 비율(25/50/100%)만큼 사단이 행군(2초)해 내 지역이면 합류, 남의 지역이면 전투. 선택하면 인접 지역이 밝아진다(✓이김/✕짐). 먼 곳은 반란으로.</p>
     <h3>반란</h3><p>남이 가진 지역을 탭 → ✊반란 10/100/500/최대. 내 모든 풀에서 빠지고 10초 뒤 70%가 그 지역 안에서 봉기해 방어+사단과 싸운다. 인접할 필요 없음. AI도 똑같이 한다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
     <h3>끝</h3><p>230개 다 가지면 정복, 지역·사단·반란이 다 없어지면 전멸 → 환생(유산 포인트 → 상점 영구 보너스, 축복 3택1) 후 새 판. 죽어도 다시 하면 된다.</p>
@@ -163,14 +163,14 @@ function settle(elapsed) {
 function loop(now) {
   const dt = Math.min(1, (now - last) / 1000); last = now;
   if (!ended) {
-    acc += dt * (state.legacy.speed || 1);
-    while (acc >= TICK) { tick(state, TICK); runAi(state, TICK); acc -= TICK; }
+    let d = dt * (state.legacy.speed || 1); // 프레임마다 돌려서 행군이 매끄럽게 (0.25초 넘으면 쪼갠다)
+    while (d > 0) { const st = Math.min(TICK, d); tick(state, st); runAi(state, st); d -= st; }
     for (const e of effects) e.t += dt * (e.speed || 1.5); effects = effects.filter(e => e.t < 1);
     saveAcc += dt; if (saveAcc >= AUTOSAVE) { save(); saveAcc = 0; }
     checkEnd();
   }
   const marks = {};
-  if (sel !== null && state.run.regions[sel].div >= 1) for (const n of neighbors(sel)) if (state.run.regions[n].owner !== PLAYER) marks[n] = predict(state, sel, n, state.run.sendRatio).win ? 'win' : 'lose';
+  if (sel !== null && state.run.regions[sel].div >= 1) for (const n of neighbors(sel)) marks[n] = state.run.regions[n].owner === PLAYER ? 'move' : predict(state, sel, n, state.run.sendRatio).win ? 'win' : 'lose';
   draw(ctx, state, cam, W, H, { selected: sel, inspect, effects, marks });
   refresh();
   requestAnimationFrame(loop);
