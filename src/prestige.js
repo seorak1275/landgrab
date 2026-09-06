@@ -1,4 +1,5 @@
 import { generateRun, PLAYER } from './world.js';
+import { difficultyOf } from './sim.js';
 
 export const LEGACY_ITEMS = {
   gold:      { name: '풍요',         desc: '골드 생산 +10%/레벨',        max: 20, base: 5 },
@@ -19,12 +20,12 @@ export function buy(state, key) {
   return true;
 }
 export function pointsFor(state, outcome) {
-  const run = state.run;
+  const run = state.run; const k = difficultyOf(state).points;
   if (outcome === 'conquered') {
     const levels = run.tiles.filter(t => t.owner === PLAYER).reduce((s, t) => s + t.level, 0);
-    return 10 + Math.floor(run.tiles.length / 4) + Math.floor(levels / 10);
+    return Math.floor((10 + Math.floor(run.tiles.length / 4) + Math.floor(levels / 10)) * k);
   }
-  return Math.max(1, Math.floor(run.maxTilesOwned / 4));
+  return Math.max(1, Math.floor(run.maxTilesOwned / 4 * k));
 }
 export function rebirth(state, outcome, seed, mapKey = state.legacy.mapPref || state.run.map || 'hex') {
   const pts = pointsFor(state, outcome);

@@ -61,8 +61,10 @@ export async function run(h) {
   say('drag select minus tap', 'sel=' + await h.eval(`JSON.stringify(__game.sel)`));
   say('multi panel', await h.eval(`document.getElementById('p-title').textContent + ' | ' + document.getElementById('p-stats').textContent.split(String.fromCharCode(10))[0] + ' | sel=' + JSON.stringify(__game.sel)`));
   await h.shot(`${SP}/s4b_multi_preview.png`);
-  await h.tap(far.pt[0], far.pt[1]); await h.wait(600);
-  say('far attack (battle)', await h.eval(`(() => { const run = __game.state.run, t = run.tiles[${far.targetId}]; return 'owner=' + t.owner + ' attackers=' + Math.floor(t.battle ? t.battle.attackers : -1) + ' defenders=' + Math.floor(t.soldiers) + ' hint=' + document.getElementById('hint').textContent; })()`));
+  await h.tap(far.pt[0], far.pt[1]); await h.wait(300);
+  say('far attack (marching)', await h.eval(`'armies=' + __game.state.run.armies.length + ' hint=' + document.getElementById('hint').textContent`));
+  await h.wait(2200);
+  say('far attack (battle)', await h.eval(`(() => { const run = __game.state.run, t = run.tiles[${far.targetId}]; return 'owner=' + t.owner + ' attackers=' + Math.floor(t.battle ? t.battle.parties.reduce((s, p) => s + p.soldiers, 0) : -1) + ' defenders=' + Math.floor(t.soldiers); })()`));
   await h.shot(`${SP}/s4c_far_attack.png`);
   await h.wait(4500);
   await h.eval(`__game.state.run.tiles[${far.ids[0]}].soldiers += 7`); await h.wait(350);

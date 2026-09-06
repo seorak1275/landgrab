@@ -2,7 +2,16 @@ import { neighbors, key } from './hex.js';
 import { TERRAIN, PLAYER, NEUTRAL } from './world.js';
 
 export const MAX_LEVEL = 10;
-export const AI_BASE_MUL = 0.6; // AI 생산 배율(골드·병사) 기본값, 환생마다 +0.1 (중립 수비를 가장 가까운 수도 기준으로 바꾼 뒤 0.75로는 활동적 플레이어도 3/5 전멸해서 하향)
+// 난이도 = AI 생산 배율(골드·병사) 기본값. 유산 포인트 배수로 보상. (0.6은 "너무 쉽다"는 피드백, 1.0은 탐욕 스크립트도 가끔 전멸, 1.2는 항상 전멸)
+export const DIFFICULTIES = {
+  easy:   { name: '쉬움',   mul: 0.6, points: 1 },
+  normal: { name: '보통',   mul: 0.8, points: 1.25 },
+  hard:   { name: '어려움', mul: 1.0, points: 1.5 },
+  hell:   { name: '지옥',   mul: 1.2, points: 2 },
+};
+export const DEFAULT_DIFFICULTY = 'normal';
+export function difficultyOf(state) { return DIFFICULTIES[state.legacy.difficulty] || DIFFICULTIES[DEFAULT_DIFFICULTY]; }
+export const AI_BASE_MUL = DIFFICULTIES[DEFAULT_DIFFICULTY].mul;
 const indexCache = new WeakMap();
 function index(run) {
   let m = indexCache.get(run.tiles);
@@ -15,11 +24,16 @@ export function neighborIds(run, tile) {
 }
 export function isAdjacent(run, a, b) { return neighborIds(run, a).includes(b.id); }
 
+// AI 배율 = 난이도 기본값 + 환생 0.1/회 + 시간 경과(10분마다 AI_RAMP, 최대 AI_RAMP_MAX): 초반은 숨 돌릴 틈, 갈수록 압박
+export const AI_RAMP = 0.1, AI_RAMP_MAX = 1.0;
+export function aiMul(state) {
+  return difficultyOf(state).mul + 0.1 * state.legacy.prestigeCount + Math.min(AI_RAMP_MAX, AI_RAMP * (state.run.elapsed || 0) / 600);
+}
 export function prodMul(state, f) {
-  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.gold || 0) : AI_BASE_MUL + 0.1 * state.legacy.prestigeCount;
+  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.gold || 0) : aiMul(state);
 }
 export function soldierMul(state, f) {
-  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.soldiers || 0) : AI_BASE_MUL + 0.1 * state.legacy.prestigeCount;
+  return f === PLAYER ? 1 + 0.1 * (state.legacy.upgrades.soldiers || 0) : aiMul(state);
 }
 export function attackMul(state, f) { return f === PLAYER ? 1 + 0.05 * (state.legacy.upgrades.attack || 0) : 1; }
 export function cap(tile) { return 20 * tile.level * TERRAIN[tile.terrain].cap; }
@@ -71,6 +85,7 @@ export function tick(state, dt) {
     const c = cap(t);
     if (t.soldiers < c) t.soldiers = Math.min(c, t.soldiers + soldierRate(state, t, holders) * dt);
   }
+  runArmies(state, dt);
   runBattles(state, dt);
   run.elapsed += dt;
   updateMaxTiles(state);
@@ -86,51 +101,128 @@ export function upgrade(state, tileId) {
   return true;
 }
 
-// 공격 예측: 지금 비율로 보내면 이기는지 (규칙 3.3과 같은 수식, 상태는 바꾸지 않음)
-// 지금 이 타일을 치면 맞서게 될 수비 전력. 다른 세력이 싸우는 중이면 그 전투가 먼저 끝난 뒤 남는 쪽의 전력.
-export function effectiveDefense(to, owner) {
-  const def = 1 + TERRAIN[to.terrain].def, D = to.soldiers * def;
-  const b = to.battle;
-  if (!b || b.attacker === owner) return D;
-  const A = b.attackers * b.am;
-  return A > D ? (A - D) / b.am * def : D - A;
-}
-export function predictAttack(state, from, to, ratio) {
-  const amount = from.soldiers * ratio;
-  const am = attackMul(state, from.owner);
-  const joining = to.battle && to.battle.attacker === from.owner ? to.battle.attackers : 0; // 이미 싸우고 있는 내 병사
-  const A = (amount + joining) * am, D = effectiveDefense(to, from.owner);
-  return { win: amount >= 1 && A > D, A, D, remaining: A > D ? (A - D) / am : 0 };
-}
-
 // 파병 결과를 화면 연출에 알리는 훅(규칙엔 영향 없음). main이 등록한다.
 let sendListener = null;
 export function setSendListener(fn) { sendListener = fn; }
+const emit = r => { if (sendListener) sendListener(r); };
 
-export const BATTLE_SECONDS = 4; // 전투 시작 시 약한 쪽이 전멸하기까지 걸리는 시간
+// ---- 전투 (규칙 3.3) ----
+// 타일 전투: tile.battle = { parties: [{ owner, soldiers, am }], rate }. 수비 전력 = tile.soldiers × (1+지형방어), 공격 전력 = soldiers × 공격배율.
+// 모든 편이 같은 속도(rate, 전력/초)로 깎인다 → 가장 센 편이 남고, 남는 전력 = 1등 − 2등. 세 편 이상이면 난전.
+// rate = 3 + 0.5·√(전투 시작 시 전력 합계): 작은 싸움은 2~3초, 수백 명 싸움은 20초 안팎. 합류하면 rate는 커질 수만 있다(시간이 초기화되지 않음).
+export const ARMY_SPEED = 2; // 행군 속도, 타일/초
+export function battleRate(total) { return 3 + 0.5 * Math.sqrt(total); }
+export function battleParty(tile, owner) { return tile.battle ? tile.battle.parties.find(p => p.owner === owner) : undefined; }
+export function battleAttackers(tile) { return tile.battle ? tile.battle.parties.reduce((s, p) => s + p.soldiers, 0) : 0; }
+function defense(tile) { return tile.soldiers * (1 + TERRAIN[tile.terrain].def); }
+function refreshRate(t) {
+  const total = defense(t) + t.battle.parties.reduce((s, p) => s + p.soldiers * p.am, 0);
+  t.battle.rate = Math.max(t.battle.rate || 0, battleRate(total));
+}
+function joinBattle(t, owner, soldiers, am) {
+  if (!t.battle) t.battle = { parties: [], rate: 0 };
+  let p = t.battle.parties.find(p => p.owner === owner);
+  if (!p) { p = { owner, soldiers: 0, am }; t.battle.parties.push(p); }
+  p.soldiers += soldiers;
+  refreshRate(t);
+}
+// 이 타일을 owner가 치면 맞서게 될 전력: 수비와 다른 공격 편 중 가장 센 것
+export function effectiveDefense(to, owner) {
+  let D = defense(to);
+  if (to.battle) for (const p of to.battle.parties) if (p.owner !== owner) D = Math.max(D, p.soldiers * p.am);
+  return D;
+}
+// 공격 예측: 지금 비율로 보내면 이기는지 (상태는 바꾸지 않음)
+export function predictAttack(state, from, to, ratio) {
+  const amount = from.soldiers * ratio;
+  const am = attackMul(state, from.owner);
+  const mine = battleParty(to, from.owner);
+  const A = (amount + (mine ? mine.soldiers : 0)) * am, D = effectiveDefense(to, from.owner);
+  return { win: amount >= 1 && A > D, A, D, remaining: A > D ? (A - D) / am : 0 };
+}
 
-// 전투 진행: 양쪽이 같은 속도(전력 단위)로 깎인다 → 끝나면 즉시 판정과 같은 결과(|A−D|)
 function battleTick(state, t, dt) {
   const b = t.battle; const def = 1 + TERRAIN[t.terrain].def;
-  let A = b.attackers * b.am, D = t.soldiers * def;
-  const loss = Math.min(b.rate * dt, A, D);
-  A -= loss; D -= loss;
-  b.attackers = A / b.am; t.soldiers = D / def;
-  if (A > 1e-9 && D > 1e-9) return null;
-  const prevOwner = t.owner, attacker = b.attacker;
+  let D = t.soldiers * def, defenderAlive = D > 1e-9;
+  const S = b.parties.map(p => p.soldiers * p.am);
+  const dead = [];
+  // 한 틱 안에서 여러 편이 차례로 탈락할 수 있다(굵은 틱): 가장 약한 편이 죽을 때까지 깎고, 남은 시간으로 반복
+  let rem = dt;
+  while (rem > 0) {
+    const alive = S.filter(v => v > 1e-9);
+    if (!(defenderAlive ? alive.length >= 1 : alive.length >= 2)) break; // 한 편만 남았다
+    const loss = Math.min(b.rate * rem, ...(defenderAlive ? [D] : []), ...alive);
+    if (!(loss > 0)) break;
+    rem -= loss / b.rate;
+    if (defenderAlive) { D -= loss; if (D <= 1e-9) { D = 0; defenderAlive = false; } }
+    for (let i = 0; i < S.length; i++) if (S[i] > 1e-9) { S[i] -= loss; if (S[i] <= 1e-9) { S[i] = 0; dead.push(b.parties[i]); } }
+  }
+  t.soldiers = D / def; b.parties.forEach((p, i) => { p.soldiers = S[i] / p.am; });
+  b.parties = b.parties.filter(p => p.soldiers > 1e-9);
+  if (defenderAlive ? b.parties.length : b.parties.length >= 2) return; // 아직 둘 이상 남았다
+  const prevOwner = t.owner;
   delete t.battle;
-  let result;
-  if (A > D) { t.owner = attacker; t.soldiers = A / b.am; updateMaxTiles(state); result = { type: 'capture', remaining: t.soldiers, prevOwner }; }
-  else { t.soldiers = D / def; result = { type: 'repel', defendersLeft: t.soldiers, prevOwner }; }
-  if (sendListener) sendListener({ ...result, fromId: t.id, toId: t.id, owner: attacker });
-  return result;
+  for (const p of dead) emit({ type: 'repel', fromId: t.id, toId: t.id, owner: p.owner, defendersLeft: defenderAlive ? D / def : 0, prevOwner });
+  if (b.parties.length === 1) {
+    const w = b.parties[0];
+    t.owner = w.owner; t.soldiers = w.soldiers; updateMaxTiles(state);
+    emit({ type: 'capture', fromId: t.id, toId: t.id, owner: w.owner, remaining: w.soldiers, prevOwner });
+  } else t.soldiers = defenderAlive ? D / def : 0;
 }
-// 진행 중인 전투를 지금 당장 끝까지 돌린다 (다른 세력이 끼어들 때)
-export function resolveBattle(state, t) { while (t.battle) battleTick(state, t, 1e9); }
 export function runBattles(state, dt) {
   for (const t of state.run.tiles) if (t.battle) battleTick(state, t, dt);
 }
+// 진행 중인 전투를 지금 당장 끝까지 돌린다
+export function resolveBattle(state, t) { while (t.battle) battleTick(state, t, 1e9); }
 
+// ---- 행군 ----
+// run.armies = [{ owner, soldiers, am, path: [타일 id…], pos }]. pos는 path 위 위치(정수면 그 타일 위).
+// 내 땅을 따라 목적지로 가고, 도착하면 내 땅이면 합류, 남의 땅이면 그 타일 전투에 참가.
+// 가는 길의 내 땅이 그새 빼앗겼으면 거기서 싸운다. 같은 변을 마주 보고 지나는 적 부대와는 그 자리에서 부딪힌다(야전, 즉시 판정).
+function armies(run) { return run.armies || (run.armies = []); }
+function depart(state, owner, soldiers, path) {
+  const a = { owner, soldiers, am: attackMul(state, owner), path, pos: 0 };
+  armies(state.run).push(a);
+  return a;
+}
+function arrive(state, army) {
+  const run = state.run; const t = run.tiles[army.path[army.path.length - 1]];
+  run.armies.splice(run.armies.indexOf(army), 1);
+  if (t.owner === army.owner) { t.soldiers += army.soldiers; if (t.battle) refreshRate(t); emit({ type: 'arrive', fromId: t.id, toId: t.id, owner: army.owner, sent: army.soldiers }); }
+  else { joinBattle(t, army.owner, army.soldiers, army.am); emit({ type: 'engage', fromId: t.id, toId: t.id, owner: army.owner, sent: army.soldiers }); }
+}
+function clash(state, x, y, a, b) {
+  const run = state.run;
+  const Sx = x.soldiers * x.am, Sy = y.soldiers * y.am;
+  const winner = Sx > Sy ? x : Sy > Sx ? y : null;
+  if (winner) winner.soldiers = Math.abs(Sx - Sy) / winner.am;
+  for (const z of [x, y]) if (z !== winner) run.armies.splice(run.armies.indexOf(z), 1);
+  emit({ type: 'clash', fromId: a, toId: b, owner: winner ? winner.owner : NEUTRAL, remaining: winner ? winner.soldiers : 0, losers: [x, y].filter(z => z !== winner).map(z => z.owner) });
+}
+export function runArmies(state, dt) {
+  const run = state.run; const list = armies(run);
+  for (const army of [...list]) {
+    let move = ARMY_SPEED * dt;
+    while (list.includes(army)) {
+      const k = Math.floor(army.pos + 1e-9), last = army.path.length - 1;
+      if (k >= last) { arrive(state, army); break; }
+      const a = army.path[k], b = army.path[k + 1];
+      // 같은 변을 반대로 건너는 적 부대와 충돌
+      const foe = list.find(o => o !== army && o.owner !== army.owner && o.path[Math.floor(o.pos + 1e-9)] === b && o.path[Math.floor(o.pos + 1e-9) + 1] === a);
+      if (foe) { clash(state, army, foe, a, b); continue; }
+      if (move <= 0) break;
+      const step = Math.min(move, k + 1 - army.pos); army.pos += step; move -= step;
+      if (army.pos >= k + 1 - 1e-9) {
+        army.pos = k + 1;
+        const t = run.tiles[b];
+        if (k + 1 === last) { arrive(state, army); break; }
+        if (t.owner !== army.owner) { army.path = army.path.slice(0, k + 2); arrive(state, army); break; } // 길이 끊겼다: 여기서 싸운다
+      }
+    }
+  }
+}
+
+// 인접 타일로 비율만큼 출발. 결과 type은 의도(move/attack)이고 실제 결과는 도착 뒤 전투가 정한다.
 export function send(state, fromId, toId, ratio) {
   const run = state.run;
   const from = run.tiles[fromId], to = run.tiles[toId];
@@ -139,30 +231,18 @@ export function send(state, fromId, toId, ratio) {
   const amount = from.soldiers * ratio;
   if (amount < 1) return { type: 'invalid' };
   from.soldiers -= amount;
-  let result;
-  if (to.owner === from.owner) { // 공격받는 중이면 수비에 합류
-    to.soldiers += amount; result = { type: 'move', sent: amount };
-    if (to.battle) to.battle.rate = Math.max(to.battle.rate, Math.min(to.battle.attackers * to.battle.am, to.soldiers * (1 + TERRAIN[to.terrain].def)) / BATTLE_SECONDS);
-  }
-  else if (to.battle && to.battle.attacker !== from.owner) {
-    // 남의 전투에 제3세력으로 끼어들면 그 전투부터 끝낸다 (주인이 바뀔 수 있음)
-    resolveBattle(state, to);
-    if (to.owner === from.owner) { to.soldiers += amount; result = { type: 'move', sent: amount }; }
-  }
-  if (!result) {
-    const am = attackMul(state, from.owner), def = 1 + TERRAIN[to.terrain].def;
-    if (!to.battle) to.battle = { attacker: from.owner, attackers: 0, am, rate: 0 };
-    to.battle.attackers += amount;
-    to.battle.rate = Math.min(to.battle.attackers * am, to.soldiers * def) / BATTLE_SECONDS;
-    result = { type: 'attack', sent: amount, attackers: to.battle.attackers };
-  }
-  if (sendListener) sendListener({ ...result, fromId, toId, owner: from.owner });
+  depart(state, from.owner, amount, [fromId, toId]);
+  const result = { type: to.owner === from.owner ? 'move' : 'attack', sent: amount, eta: 1 / ARMY_SPEED, fromId, toId, owner: from.owner };
+  emit(result);
   return result;
 }
 
 export function status(state) {
   const n = tilesOwned(state, PLAYER);
-  if (n === 0) return state.run.tiles.some(t => t.battle && t.battle.attacker === PLAYER) ? 'playing' : 'wiped';
+  if (n === 0) {
+    const fighting = state.run.tiles.some(t => battleParty(t, PLAYER)) || armies(state.run).some(a => a.owner === PLAYER);
+    return fighting ? 'playing' : 'wiped';
+  }
   if (n === state.run.tiles.length) return 'conquered';
   return 'playing';
 }
@@ -195,8 +275,8 @@ export function stagingFor(run, parent, toId) {
   }
   return best ? best.id : null;
 }
-// 출발 타일들에서 비율만큼 떼어 목적지로: 내 땅이면 이동, 남의 땅이면 집결지에 모아 한 번에 공격.
-// 길이 끊긴(내 땅으로 못 가는) 출발 타일은 제외된다. legs = 출발마다 지나간 경로.
+// 출발 타일들에서 비율만큼 떼어 목적지로 행군: 내 땅이면 이동, 남의 땅이면 집결지를 지나 곧장 공격(먼저 닿는 부대부터 싸움에 든다).
+// 길이 끊긴(내 땅으로 못 가는) 출발 타일은 제외된다. legs = 출발마다 지나갈 경로.
 export function dispatch(state, fromIds, toId, ratio) {
   const run = state.run; const to = run.tiles[toId];
   if (!to) return { type: 'invalid' };
@@ -210,15 +290,16 @@ export function dispatch(state, fromIds, toId, ratio) {
     const parent = bfsOwn(run, fid);
     const stagingId = to.owner === owner ? (parent.has(toId) ? toId : null) : stagingFor(run, parent, toId);
     if (stagingId === null) continue;
-    legs.push({ fromId: fid, stagingId, path: pathTo(parent, stagingId), amount }); total += amount;
+    const path = pathTo(parent, stagingId); if (to.owner !== owner) path.push(toId);
+    legs.push({ fromId: fid, stagingId, path, amount }); total += amount;
   }
   if (!legs.length) return { type: 'invalid' };
-  for (const l of legs) { run.tiles[l.fromId].soldiers -= l.amount; run.tiles[l.stagingId].soldiers += l.amount; }
-  if (to.owner === owner) return { type: 'move', sent: total, legs };
-  const stage = run.tiles[legs[0].stagingId];
-  for (const l of legs.slice(1)) if (l.stagingId !== stage.id) { run.tiles[l.stagingId].soldiers -= l.amount; stage.soldiers += l.amount; }
-  const r = send(state, stage.id, toId, total / stage.soldiers);
-  return { ...r, legs };
+  for (const l of legs) { run.tiles[l.fromId].soldiers -= l.amount; depart(state, owner, l.amount, l.path); }
+  const type = to.owner === owner ? 'move' : 'attack';
+  const eta = Math.max(...legs.map(l => l.path.length - 1)) / ARMY_SPEED;
+  const result = { type, sent: total, legs, eta, fromId: legs[0].fromId, toId, owner };
+  emit(result);
+  return result;
 }
 // 미리보기: 선택한 출발 타일들에서 지금 비율로 보낼 때 갈 수 있는 목적지마다 'move' | 'win' | 'lose'
 export function previewTargets(state, fromIds, ratio) {
@@ -226,7 +307,6 @@ export function previewTargets(state, fromIds, ratio) {
   const sources = fromIds.map(id => run.tiles[id]).filter(t => t && t.owner !== NEUTRAL);
   if (!sources.length) return marks;
   const owner = sources[0].owner;
-  const comp = new Map(); // 타일 id → 그 연결 성분에서 보낼 수 있는 병사 합
   const seen = new Map(); // 타일 id → 성분 번호
   const compAmount = [];
   for (const s of sources) {
@@ -243,8 +323,8 @@ export function previewTargets(state, fromIds, ratio) {
     for (const nid of neighborIds(run, run.tiles[id])) {
       const n = run.tiles[nid];
       if (n.owner === owner) continue;
-      const joining = n.battle && n.battle.attacker === owner ? n.battle.attackers : 0;
-      const win = (amount + joining) * am > effectiveDefense(n, owner);
+      const mine = battleParty(n, owner);
+      const win = (amount + (mine ? mine.soldiers : 0)) * am > effectiveDefense(n, owner);
       // 여러 성분이 닿으면 이기는 쪽이 있으면 win (실제 명령은 모든 성분을 합치지 않지만, 한 성분이면 정확)
       if (marks[nid] !== 'win') marks[nid] = win ? 'win' : 'lose';
     }

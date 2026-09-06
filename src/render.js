@@ -1,7 +1,7 @@
 import { hexToPixel, hexCorners, pixelToHex, DIRS, key } from './hex.js';
 import { NEUTRAL } from './world.js';
 import { MAPS } from './mapgen.js';
-import { regionHolders } from './sim.js';
+import { regionHolders, battleAttackers } from './sim.js';
 
 export const HEX_SIZE = 36;
 export const FACTION_COLORS = ['#2f80ed', '#eb5757', '#f2c94c', '#9b51e0', '#27ae60'];
@@ -120,14 +120,15 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
       ctx.font = `bold ${Math.round(size * 0.5 * (pop[t.id] || 1))}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const label = String(Math.floor(t.soldiers));
       ctx.strokeText(label, cx, cy + size * 0.05); ctx.fillText(label, cx, cy + size * 0.05);
-      if (t.battle && size >= 20) {
-        // 전투 중: 공격 세력 색으로 ⚔공격병 수, 테두리는 깜빡임
+      if (t.battle && t.battle.parties.length && size >= 20) {
+        // 전투 중: 가장 센 공격 편 색으로 ⚔공격병 합계(여러 편이면 '난전'), 테두리는 깜빡임
+        const lead = t.battle.parties.reduce((a, b) => (b.soldiers * b.am > a.soldiers * a.am ? b : a));
         ctx.font = `bold ${Math.round(size * 0.32)}px system-ui, sans-serif`;
-        ctx.fillStyle = ownerColor(t.battle.attacker); ctx.lineWidth = 3;
-        const bl = `⚔${Math.floor(t.battle.attackers)}`;
+        ctx.fillStyle = ownerColor(lead.owner); ctx.lineWidth = 3;
+        const bl = `⚔${Math.floor(battleAttackers(t))}${t.battle.parties.length > 1 ? '난전' : ''}`;
         ctx.strokeText(bl, cx, cy - size * 0.42); ctx.fillText(bl, cx, cy - size * 0.42);
         ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath();
-        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 120); ctx.strokeStyle = ownerColor(t.battle.attacker); ctx.lineWidth = Math.max(2, size * 0.12); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 120); ctx.strokeStyle = ownerColor(lead.owner); ctx.lineWidth = Math.max(2, size * 0.12); ctx.stroke(); ctx.globalAlpha = 1;
         ctx.fillStyle = '#fff';
       }
       if (t.owner !== NEUTRAL && size >= 20) {
@@ -170,10 +171,39 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
       ctx.fillText(text, cx, y);
     }
   }
+  // 행군 중인 부대: 경로 위 현재 위치에 주인 색 원과 병사 수
+  for (const a of run.armies || []) {
+    const k = Math.min(Math.floor(a.pos), a.path.length - 1), u = a.pos - k;
+    const p = run.tiles[a.path[k]], n = run.tiles[a.path[Math.min(k + 1, a.path.length - 1)]];
+    if (!p || !n) continue;
+    const [px, py] = worldToScreen(cam, W, H, ...hexToPixel(p.q, p.r, HEX_SIZE));
+    const [nx, ny] = worldToScreen(cam, W, H, ...hexToPixel(n.q, n.r, HEX_SIZE));
+    const x = px + (nx - px) * u, y = py + (ny - py) * u;
+    if (x < -size || y < -size || x > W + size || y > H + size) continue;
+    ctx.beginPath(); ctx.arc(x, y, size * 0.24, 0, Math.PI * 2);
+    ctx.fillStyle = ownerColor(a.owner); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1, size * 0.04); ctx.stroke();
+    if (size >= 14) {
+      ctx.font = `bold ${Math.round(size * 0.26)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 2;
+      const s = String(Math.floor(a.soldiers)); ctx.strokeText(s, x, y); ctx.fillText(s, x, y);
+    }
+  }
   for (const e of effects) {
     const a = run.tiles[e.fromId], b = run.tiles[e.toId];
     if (!b) continue;
     if (e.kind === 'pop') continue;
+    if (e.kind === 'burst') {
+      // 야전(부딪힘) 연출: 두 타일 사이에서 터지는 고리와 ⚔
+      if (!a) continue;
+      const [ax, ay] = worldToScreen(cam, W, H, ...hexToPixel(a.q, a.r, HEX_SIZE));
+      const [bx, by] = worldToScreen(cam, W, H, ...hexToPixel(b.q, b.r, HEX_SIZE));
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      ctx.beginPath(); ctx.arc(mx, my, size * (0.2 + e.t * 0.8), 0, Math.PI * 2);
+      ctx.strokeStyle = e.color; ctx.globalAlpha = 1 - e.t; ctx.lineWidth = Math.max(2, size * 0.12); ctx.stroke();
+      if (size >= 14) { ctx.font = `bold ${Math.round(size * 0.5)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText('⚔', mx, my); }
+      ctx.globalAlpha = 1;
+      continue;
+    }
     if (e.kind === 'float') {
       if (size < 14) continue;
       const [bx, by] = worldToScreen(cam, W, H, ...hexToPixel(b.q, b.r, HEX_SIZE));

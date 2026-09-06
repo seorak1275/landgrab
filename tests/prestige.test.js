@@ -17,18 +17,20 @@ test('상점 비용 = 기본×1.5^레벨, 최대 레벨·포인트 부족이면 
   assert.equal(buy(s, 'offline'), false);
 });
 
-test('포인트: 정복 = 10 + 타일/4 + 레벨합/10, 전멸 = 최대보유/4(최소 1)', () => {
-  const s = makeState();
+test('포인트: 정복 = 10 + 타일/4 + 레벨합/10, 전멸 = 최대보유/4(최소 1), 난이도 배수', () => {
+  const s = makeState(); s.legacy.difficulty = 'easy';
   for (const t of s.run.tiles) { t.owner = PLAYER; t.level = 3; }
   assert.equal(pointsFor(s, 'conquered'), 10 + 9 + Math.floor(111 / 10));
   s.run.maxTilesOwned = 2;
   assert.equal(pointsFor(s, 'wiped'), 1);
   s.run.maxTilesOwned = 13;
   assert.equal(pointsFor(s, 'wiped'), 3);
+  s.legacy.difficulty = 'normal'; assert.equal(pointsFor(s, 'conquered'), Math.floor(30 * 1.25)); assert.equal(pointsFor(s, 'wiped'), Math.floor(13 / 4 * 1.25));
+  s.legacy.difficulty = 'hell'; assert.equal(pointsFor(s, 'conquered'), 60);
 });
 
 test('환생: 포인트 적립, 횟수 증가, 새 판(반지름·AI 공식), 유산 유지', () => {
-  const s = makeState();
+  const s = makeState(); s.legacy.difficulty = 'easy';
   s.legacy.upgrades.startArmy = 1;
   for (const t of s.run.tiles) t.owner = PLAYER;
   const got = rebirth(s, 'conquered', 123);

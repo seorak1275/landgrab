@@ -56,6 +56,7 @@ export function generateRun(seed, prestige, upgrades = {}, mapKey = 'hex') {
     ...(lay.regions ? { regions: lay.regions, cell: lay.cell } : {}),
     gold: Array(factions).fill(100),
     aiTimers: Array(factions).fill(0),
+    armies: [], // 행군 중인 부대 (sim.js)
     maxTilesOwned: 1,
     sendRatio: 0.5,
     elapsed: 0,

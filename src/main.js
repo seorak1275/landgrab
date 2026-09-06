@@ -6,7 +6,7 @@ import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn } from './pr
 import { newState, save, load, serialize, deserialize, SAVE_KEY } from './save.js';
 import { createCamera, draw, pickTile, loadAssets, worldBounds, FACTION_COLORS, ownerColor } from './render.js';
 import { MAPS, DEFAULT_MAP } from './mapgen.js';
-import { regionHolders } from './sim.js';
+import { regionHolders, DIFFICULTIES, DEFAULT_DIFFICULTY, difficultyOf } from './sim.js';
 import { updateTop, updatePanel, upgradePlan, setRatioButtons, setHint, flashHint, bindButtons, showModal, hideModal, isModalOpen, attachCanvasInput, formatNum } from './ui.js';
 
 const TICK = 0.25, AUTOSAVE = 5, RESUME_MIN = 30;
@@ -60,11 +60,14 @@ function refresh() {
 function clearSel() { sel = []; inspectId = null; }
 function hms(sec) { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60); return h ? `${h}시간 ${m}분` : `${m}분`; }
 
-// 파병 연출: 경로를 따라 점이 움직이고, 점령되면 새 주인 색 고리
-function pushLeg(path, color) { effects.push({ fromId: path[0], toId: path[path.length - 1], path, t: 0, color, speed: 1 / (0.25 * Math.max(1, path.length - 1)) }); }
+// 연출: 행군 부대는 render가 run.armies를 직접 그리고, 점령되면 새 주인 색 고리, 야전은 두 타일 사이 터짐
 setSendListener(r => {
-  if (r.owner !== PLAYER && (r.type === 'move' || r.type === 'attack')) pushLeg([r.fromId, r.toId], ownerColor(r.owner)); // AI 움직임도 보이게
   if (r.type === 'capture') effects.push({ kind: 'ring', fromId: r.fromId, toId: r.toId, t: 0, color: ownerColor(r.owner), speed: 1 / 0.6 });
+  if (r.type === 'clash') {
+    effects.push({ kind: 'burst', fromId: r.fromId, toId: r.toId, t: 0, color: r.owner === PLAYER ? FACTION_COLORS[PLAYER] : '#ffd166', speed: 1 / 0.7 });
+    if (r.owner === PLAYER) flashHint(`⚔ 야전 승리! 적 부대를 깨고 ${Math.floor(r.remaining)}명이 계속 갑니다`);
+    else if (r.losers.includes(PLAYER)) flashHint(`⚔ 야전 패배… 마주 오던 적 부대에 부대가 전멸했습니다`);
+  }
   if (r.type === 'repel' && r.owner === PLAYER) flashHint(`공격 실패 · 수비 ${Math.floor(r.defendersLeft)}명 남음`);
   if (r.type === 'capture' && r.prevOwner === PLAYER) flashHint(`${state.run.tiles[r.toId] ? TERRAIN[state.run.tiles[r.toId].terrain].name : '땅'}을 ${r.owner === PLAYER ? '' : 'AI ' + r.owner + '에게 '}빼앗겼습니다`);
   if (r.type === 'capture' && r.owner === PLAYER && state.run.regions) {
@@ -76,13 +79,17 @@ setSendListener(r => {
 
 // 지도 고르기 창. onPick(mapKey)
 function mapPickerHtml(current) {
-  return Object.values(MAPS).map(m => `<label class="map-row"><input type="radio" name="map" value="${m.key}" ${m.key === current ? 'checked' : ''}> <b>${m.name}</b><span class="desc">${m.desc}${m.homeName ? ` · 내 수도 ${m.homeName}` : ''}</span></label>`).join('');
+  const maps = Object.values(MAPS).map(m => `<label class="map-row"><input type="radio" name="map" value="${m.key}" ${m.key === current ? 'checked' : ''}> <b>${m.name}</b><span class="desc">${m.desc}${m.homeName ? ` · 내 수도 ${m.homeName}` : ''}</span></label>`).join('');
+  const cur = state.legacy.difficulty || DEFAULT_DIFFICULTY;
+  const diffs = Object.entries(DIFFICULTIES).map(([k, d]) => `<label class="diff-row"><input type="radio" name="diff" value="${k}" ${k === cur ? 'checked' : ''}> ${d.name} <span class="desc">AI 생산 ×${d.mul} · 유산 ×${d.points}</span></label>`).join('');
+  return `${maps}<p class="sub">난이도 (AI는 10분마다 +0.1씩 더 세집니다)</p>${diffs}`;
 }
 function pickedMap() { const el = document.querySelector('input[name="map"]:checked'); return el ? el.value : state.run.map; }
+function pickedDifficulty() { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : (state.legacy.difficulty || DEFAULT_DIFFICULTY); }
 function openMapChange() {
   showModal({ title: '지도 바꾸기', html: `<p>이번 판은 버리고 고른 지도에서 새로 시작합니다 (유산·환생 기록은 그대로, 포인트는 없음).</p>${mapPickerHtml(state.run.map)}`,
     actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => {
-      restartOn(state, pickedMap(), Date.now() >>> 0); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); hideModal(); refresh();
+      state.legacy.difficulty = pickedDifficulty(); restartOn(state, pickedMap(), Date.now() >>> 0); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); hideModal(); refresh();
     } }] });
 }
 
@@ -94,8 +101,7 @@ function order(toId) {
     else flashHint(sel.length ? '내 땅으로 이어진 길이 없어요 (빈 곳을 탭하면 선택 해제)' : HINT_DEFAULT);
     refresh(); return;
   }
-  for (const l of r.legs) pushLeg(r.type === 'move' ? l.path : [...l.path, toId], FACTION_COLORS[PLAYER]);
-  if (r.type === 'attack') flashHint(`⚔ 전투 시작 · ${Math.floor(r.attackers)}명이 싸우는 중 (더 보내면 합류)`);
+  flashHint(r.type === 'attack' ? `⚔ 출격 · ${Math.floor(r.sent)}명 · 약 ${r.eta.toFixed(1)}초 뒤 도착 (더 보내면 합류)` : `→ 이동 · ${Math.floor(r.sent)}명 · 약 ${r.eta.toFixed(1)}초`);
   refresh(); checkEnd();
 }
 
@@ -117,7 +123,7 @@ function openMenu() {
   showModal({
     title: '메뉴',
     html: `<p>유산 포인트 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회</p>
-      <p>지도: ${(MAPS[state.run.map] || MAPS.hex).name} <button data-action="map">지도 바꾸기</button></p>
+      <p>지도: ${(MAPS[state.run.map] || MAPS.hex).name} · 난이도 ${difficultyOf(state).name} <button data-action="map">지도·난이도 바꾸기</button></p>
       <p><button data-action="shop">유산 상점</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
       <p><button data-action="reset" style="color:#eb5757">처음부터(전부 삭제)</button></p>`,
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
@@ -160,7 +166,7 @@ function checkEnd() {
   showModal({
     title: st === 'conquered' ? '🎉 지도 정복!' : '💀 전멸…',
     html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b></p><p>환생하면 지도가 초기화되고 유산 상점에서 영구 보너스를 살 수 있습니다.</p><p>다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
-    actions: [{ label: '환생', primary: true, onClick: () => { rebirth(state, st, Date.now() >>> 0, pickedMap()); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
+    actions: [{ label: '환생', primary: true, onClick: () => { const mk = pickedMap(), dk = pickedDifficulty(); state.legacy.difficulty = dk; rebirth(state, st, Date.now() >>> 0, mk); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
   });
 }
 

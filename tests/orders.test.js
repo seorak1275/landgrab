@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeState, capitalOf } from './helpers.js';
+import { makeState, capitalOf, settle } from './helpers.js';
 import { PLAYER, NEUTRAL } from '../src/world.js';
-import { neighborIds, bfsOwn, pathTo, stagingFor, dispatch, previewTargets, predictAttack, setSendListener, send, runBattles } from '../src/sim.js';
+import { neighborIds, bfsOwn, pathTo, stagingFor, dispatch, previewTargets, predictAttack, setSendListener, send, ARMY_SPEED } from '../src/sim.js';
 
 // 수도에서 한 방향으로 n칸을 내 땅으로 만든 판을 준비한다
 function corridor(s, n) {
@@ -27,9 +27,11 @@ test('dispatch 이동: 먼 내 땅으로 한 번에, 경로가 legs에 담긴다
   const cap = s.run.tiles[ids[0]], far = s.run.tiles[ids[3]];
   cap.soldiers = 40;
   const r = dispatch(s, [cap.id], far.id, 0.5);
-  assert.equal(r.type, 'move'); assert.equal(r.sent, 20);
-  assert.equal(cap.soldiers, 20); assert.equal(far.soldiers, 30);
+  assert.equal(r.type, 'move'); assert.equal(r.sent, 20); assert.equal(r.eta, 3 / ARMY_SPEED);
+  assert.equal(cap.soldiers, 20); assert.equal(far.soldiers, 10); // 아직 행군 중
   assert.deepEqual(r.legs[0].path, ids);
+  settle(s);
+  assert.equal(far.soldiers, 30);
 });
 
 test('dispatch 공격: 여러 출발지 병사를 집결지에 모아 한 번에, 보낸 양만큼만 싸운다', () => {
@@ -40,7 +42,8 @@ test('dispatch 공격: 여러 출발지 병사를 집결지에 모아 한 번에
   target.terrain = 'plain'; target.soldiers = 100;
   const r = dispatch(s, [a.id, b.id], target.id, 1);
   assert.equal(r.type, 'attack');
-  runBattles(s, 100);
+  assert.deepEqual(r.legs.map(l => l.path[l.path.length - 1]), [target.id, target.id]); // 집결지를 지나 목적지까지 한 경로
+  settle(s);
   assert.equal(target.owner, PLAYER);
   assert.ok(Math.abs(target.soldiers - 60) < 1e-6, `${target.soldiers}`); // 160 - 100
   assert.ok(Math.abs(stage.soldiers - 5) < 1e-6); // 집결지 자체 병사는 안 쓴다
@@ -60,6 +63,7 @@ test('dispatch: 길이 없거나 1명 미만이면 invalid, 이어진 출발지�
   const island = far; island.owner = PLAYER; island.soldiers = 50;
   const r = dispatch(s, [cap.id, island.id], ids[2], 0.5);
   assert.equal(r.type, 'move'); assert.equal(r.sent, 20); assert.equal(island.soldiers, 50);
+  assert.equal(r.legs.length, 1);
 });
 
 test('previewTargets: 이어진 내 땅은 move, 국경 너머는 win/lose', () => {

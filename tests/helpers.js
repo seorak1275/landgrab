@@ -1,10 +1,17 @@
 import { generateRun, PLAYER, TERRAIN } from '../src/world.js';
-import { send, upgrade, neighborIds, upgradeCost, attackMul, previewTargets, dispatch, MAX_LEVEL } from '../src/sim.js';
+import { send, upgrade, neighborIds, upgradeCost, attackMul, previewTargets, dispatch, MAX_LEVEL, runArmies, resolveBattle } from '../src/sim.js';
 export function makeState(seed = 1, prestige = 0, upgrades = {}, mapKey = 'hex') {
   const u = { gold: 0, soldiers: 0, attack: 0, startArmy: 0, offline: 0, aiSlow: 0, ...upgrades };
-  return { version: 2, legacy: { points: 0, prestigeCount: prestige, upgrades: u, mapPref: mapKey }, run: generateRun(seed, prestige, u, mapKey), lastSave: 0 };
+  return { version: 3, legacy: { points: 0, prestigeCount: prestige, upgrades: u, mapPref: mapKey, difficulty: 'normal' }, run: generateRun(seed, prestige, u, mapKey), lastSave: 0 };
 }
 export function capitalOf(state, f) { return state.run.tiles.find(t => t.owner === f && t.terrain === 'citadel'); }
+// 행군 중인 부대를 전부 도착시키고 전투를 끝까지 돌린다 (생산 없이 — 수식 검증용)
+export function settle(s) {
+  for (let i = 0; i < 1000 && ((s.run.armies && s.run.armies.length) || s.run.tiles.some(t => t.battle)); i++) {
+    runArmies(s, 1);
+    for (const t of s.run.tiles) if (t.battle) resolveBattle(s, t);
+  }
+}
 
 // 탐욕 플레이어(밸런스 검증용): 5초마다 ① 가장 낮은 레벨 타일 업그레이드 ② 이길 수 있는 가장 약한 이웃 공격(70%)
 // ③ 한 타일로는 못 이기면 내 땅 전체에서 50%씩 모아 집결 공격(사람이 [내 땅 전체 선택]으로 하는 것) ④ 국경 보강

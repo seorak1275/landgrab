@@ -66,7 +66,7 @@ export function updatePanel(state, { selected = [], inspect = null, multi = fals
     const h = regionHolders(run)[tile.region];
     if (h !== null && h !== undefined && h !== NEUTRAL) lines.push(`★ ${run.regions[tile.region]} 완전 점령 (${ownerName(h)}) · 생산 +${Math.round(REGION_BONUS * 100)}%`);
   }
-  if (tile.battle) lines.push(`⚔ 전투 중: ${ownerName(tile.battle.attacker)} 공격 ${Math.floor(tile.battle.attackers)} vs 수비 ${Math.floor(tile.soldiers)} · 병사를 더 보내면 합류`);
+  if (tile.battle && tile.battle.parties.length) lines.push(`⚔ ${tile.battle.parties.length > 1 ? '난전' : '전투 중'}: ${tile.battle.parties.map(p => `${ownerName(p.owner)} ${Math.floor(p.soldiers)}`).join(' · ')} vs 수비 ${Math.floor(tile.soldiers)} · 더 보내면 합류`);
   if (mine) lines.push(`생산 골드 ${goldRate(state, tile).toFixed(2)}/초 · 병사 ${soldierRate(state, tile).toFixed(2)}/초`);
   else lines.push(`점령하려면 ${Math.floor(tile.soldiers * (1 + tr.def)) + 1}명 넘게 보내야 함`);
   setText('p-stats', lines.join('\n'));
