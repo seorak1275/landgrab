@@ -2,10 +2,11 @@ import { generateRun } from './world.js';
 
 export const SAVE_KEY = 'landgrab.save.v1';
 export const VERSION = 3;
+export const FEATURES = 4; // 새 기능 안내 창을 본 버전 (legacy.seenFeatures). 올리면 기존 플레이어에게 다시 뜬다
 
 export function newState(seed = Date.now() >>> 0, mapKey = 'hex') {
   const upgrades = { gold: 0, soldiers: 0, attack: 0, startArmy: 0, offline: 0, aiSlow: 0 };
-  return { version: VERSION, legacy: { points: 0, prestigeCount: 0, upgrades, mapPref: mapKey }, run: generateRun(seed, 0, upgrades, mapKey), lastSave: 0 };
+  return { version: VERSION, legacy: { points: 0, prestigeCount: 0, upgrades, mapPref: mapKey, seenFeatures: FEATURES }, run: generateRun(seed, 0, upgrades, mapKey), lastSave: 0 };
 }
 export function serialize(state, now = Date.now()) { state.lastSave = now; return JSON.stringify(state); }
 export function deserialize(text) {

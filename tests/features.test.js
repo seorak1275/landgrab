@@ -97,7 +97,7 @@ test('유산: 성벽술·병참·건축·행군·통치·개척·시작 골드·
   const s = makeState(1, 0, { wall: 4, capBonus: 3, discount: 5, speed: 5, regionBonus: 2, pointsMul: 3 });
   const c = capitalOf(s, PLAYER);
   near(defMul(s, c), 2 * 1.2); // 성채 +100% × (1 + 0.05×4)
-  near(cap(c, s), 40 * 1.3);
+  near(cap(c, s), 120 * 1.3);
   near(upgradeCost(c, s), 120 * 0.85); near(upgradeCost(c), 120); near(buildCost(s, c), 450 * 0.85);
   near(armySpeed(s, PLAYER), ARMY_SPEED * 1.5); near(armySpeed(s, 1), ARMY_SPEED);
   near(regionBonus(s, PLAYER), REGION_BONUS + 0.2); near(regionBonus(s, 1), REGION_BONUS);

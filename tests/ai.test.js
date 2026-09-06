@@ -56,7 +56,7 @@ test('보강: 내부 타일이 한도 절반 이상이면 가장 약한 국경 �
   const outerId = neighborIds(s.run, ring[0]).find(id => id !== inner.id && !ring.some(r => r.id === id));
   const outer = s.run.tiles[outerId];
   outer.owner = PLAYER; outer.soldiers = 1000; // 공격 불가하게 크게
-  inner.soldiers = 30; inner.level = 1; inner.terrain = 'plain'; // cap 20 → 절반 이상
+  inner.soldiers = 30; inner.level = 1; inner.terrain = 'plain'; // cap 60 → 절반 이상
   s.run.gold[1] = 0;
   aiAct(s, 1);
   settle(s);

@@ -1,14 +1,14 @@
 import { PLAYER, TERRAIN } from './world.js';
-import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener, setBuilding, BUILDINGS } from './sim.js';
+import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener, setBuilding, BUILDINGS, TRAITS } from './sim.js';
 import { PERKS, offerPerks } from './perks.js';
 import { runAi } from './ai.js';
 import { simulateOffline } from './offline.js';
 import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn } from './prestige.js';
-import { newState, save, load, serialize, deserialize, SAVE_KEY } from './save.js';
-import { createCamera, draw, pickTile, loadAssets, worldBounds, FACTION_COLORS, ownerColor } from './render.js';
+import { newState, save, load, serialize, deserialize, SAVE_KEY, FEATURES } from './save.js';
+import { createCamera, draw, pickTile, loadAssets, worldBounds, FACTION_COLORS, ownerColor, setColorblind } from './render.js';
 import { MAPS, DEFAULT_MAP } from './mapgen.js';
 import { regionHolders, DIFFICULTIES, DEFAULT_DIFFICULTY, difficultyOf } from './sim.js';
-import { updateTop, updatePanel, upgradePlan, setRatioButtons, setHint, flashHint, bindButtons, showModal, hideModal, isModalOpen, attachCanvasInput, formatNum } from './ui.js';
+import { updateTop, updatePanel, upgradePlan, setRatioButtons, setHint, flashHint, bindButtons, showModal, hideModal, isModalOpen, attachCanvasInput, formatNum, SPEEDS, setSpeedButton } from './ui.js';
 
 const TICK = 0.25, AUTOSAVE = 5, RESUME_MIN = 30;
 const HINT_DEFAULT = '내 땅 탭 → 목적지 탭 (이어진 먼 땅도 됨). ✓ 이김 ✕ 짐';
@@ -78,6 +78,42 @@ setSendListener(r => {
   }
 });
 
+// 도움말 (설명서). section: 'build' 면 건물 절이 맨 위
+function openHelp(section = null) {
+  const build = `<h3 id="h-build">특화 건물 (내 땅 하나에 하나, 골드 150×지형계수)</h3>
+    <table>${Object.entries(BUILDINGS).map(([k, b]) => `<tr><td>${b.icon} ${b.name}</td><td>${b.desc}</td></tr>`).join('')}</table>
+    <p>바꾸면 다시 내고, 철거(✕)는 무료. <b>점령당하면 부서진다.</b> 효과는 자리에 따라 달라진다 — 버튼의 ×배율이 그 땅에서의 효율이고(초록 = 잘 맞음, 흐림 = 안 맞음), 땅을 고르면 패널이 "이 땅에 맞는 건물"을 알려준다.</p>
+    <table><tr><td>지형</td><td>산·언덕: 성벽·망루 ×1.5(언덕 ×1.3) · 평지: 농장 ×1.3 · 성채(수도): 병영 ×1.3 · 숲: 망루 ×1.2 · 뱃길: 농장 ×0.3</td></tr>
+    <tr><td>지역 특성</td><td>${Object.values(TRAITS).map(t => `${t.icon} ${t.name}: ${t.desc}`).join(' · ')}</td></tr></table>
+    <p>쓰는 법: 국경 산악엔 🛡️성벽, 국경 안쪽 평야엔 🌾농장으로 골드, 수도·도시엔 ⚔️병영으로 병사, 적과 맞닿은 곳엔 🏹망루로 알아서 치게.</p>`;
+  const rest = `<h3>기본</h3><p>내 땅 탭 → 목적지 탭. 이어진 내 땅이 있으면 먼 곳도 한 번에. 파병 비율 25/50/100%. [✎ 드래그 선택]·[내 땅 전체 선택]으로 여러 땅에서 모아 보낸다. 선택한 내 땅은 [업그레이드]로 레벨(생산·한도) 상승. 골드는 세력 공용, 병사는 땅마다. 병사 한도는 60×레벨×지형계수.</p>
+    <h3>행군·전투</h3><p>병사는 2칸/초로 행군하고 도착해야 싸운다. 전투는 모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 속도는 전력 합에 따라 작은 싸움 2~3초, 큰 싸움 20초 안팎. 더 보내면 합류(시간 초기화 없음). 셋 이상이면 난전. 서로 상대 땅을 동시에 치면 변 위에서 부딪혀(야전) 이긴 쪽 잔여만 계속. 전투 중인 땅은 징집이 멈춘다. ✓/✕는 지금 비율로 보낼 때 이기는지 미리보기.</p>
+    <h3>지형</h3><table>${Object.entries(TERRAIN).map(([k, t]) => `<tr><td>${t.name}</td><td>골드 ×${t.gold} · 방어 +${Math.round(t.def * 100)}% · 한도 ×${t.cap}</td></tr>`).join('')}</table>
+    <h3>지역</h3><p>대한민국(시·도)·서울(구) 지도에서 한 지역의 땅을 전부 가지면 그 지역 생산 +50%(2칸 이상인 지역만). 이름표가 ★와 주인 색으로 바뀐다. 섬은 뱃길로 이어진다.</p>
+    <h3>AI·난이도</h3><p>AI는 8초마다 업그레이드·공격·보강하고 4주기마다 땅 전체에서 병사를 모아 집결 공격한다. 난이도(쉬움 0.6 / 보통 0.8 / 어려움 1.0 / 지옥 1.2)는 AI 생산 배율, 유산 포인트도 ×1~2. 환생마다 +0.1, 판이 10분 지날 때마다 +0.1(최대 +1.0)씩 세진다.</p>
+    <h3>환생·유산·축복</h3><p>지도를 다 먹거나(정복) 다 잃으면(전멸, 강제) 환생. 유산 포인트로 상점의 영구 보너스 15종을 사고, 환생 때 축복 3개 중 하나를 골라 그 판에 쓴다. 지도·난이도도 그때 고른다. 꺼둔 시간(최대 8시간+유산)은 나·AI 모두 시뮬된다.</p>
+    <h3>기타</h3><p>▶×1 버튼으로 배속(×1/×2/×4, 오프라인 정산엔 영향 없음). 메뉴에 색약 모드, 저장 내보내기/가져오기.</p>`;
+  showModal({ title: '📖 도움말', html: `<div class="help">${section === 'build' ? build + rest : rest + build}</div>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
+}
+
+// 예전 저장으로 들어온 플레이어에게 새 기능 안내: 계속하거나 새 지도로 시작 (유산 유지)
+function showWelcome(then) {
+  showModal({
+    title: '🆕 새로워졌어요',
+    html: `<ul class="feat">
+      <li><b>대한민국·서울 지도</b> — 시·도/구를 전부 가지면 생산 +50%, 지역마다 특성(산악·평야·도시·해안)</li>
+      <li><b>행군 전투</b> — 병사가 실제로 이동하고, 마주치면 야전, 셋 이상이면 난전. 전투 시간은 전력에 따라</li>
+      <li><b>특화 건물</b> — 농장·병영·성벽·망루(자동 공격). 자리에 맞으면 효과 ×1.5</li>
+      <li><b>난이도·축복·유산 15종</b> — AI도 집결 공격을 합니다. 병사 한도 3배</li>
+    </ul><p>지금 판(${(MAPS[state.run.map] || MAPS.hex).name})을 이어서 해도 되고, 새 지도에서 새로 시작해도 됩니다(유산·환생 기록은 유지).</p>`,
+    actions: [
+      { label: '새 지도로 시작', onClick: () => { hideModal(); openMapChange(then); } },
+      { label: '계속하기', primary: true, onClick: () => { hideModal(); then && then(); } },
+    ],
+  });
+  state.legacy.seenFeatures = FEATURES; save(state);
+}
+
 // 지도 고르기 창. onPick(mapKey)
 function mapPickerHtml(current) {
   const maps = Object.values(MAPS).map(m => `<label class="map-row"><input type="radio" name="map" value="${m.key}" ${m.key === current ? 'checked' : ''}> <b>${m.name}</b><span class="desc">${m.desc}${m.homeName ? ` · 내 수도 ${m.homeName}` : ''}</span></label>`).join('');
@@ -93,9 +129,9 @@ function perkPickerHtml(seed) {
   return `<p class="sub">이번 판 축복 (하나 선택)</p><div class="perk-row">${keys.map((k, i) => `<label><input type="radio" name="perk" value="${k}" ${i === 0 ? 'checked' : ''}><b>${PERKS[k].icon} ${PERKS[k].name}</b><span class="desc">${PERKS[k].desc}</span></label>`).join('')}</div>`;
 }
 function pickedPerk() { const el = document.querySelector('input[name="perk"]:checked'); return el ? el.value : null; }
-function openMapChange() {
+function openMapChange(then = null) {
   showModal({ title: '지도 바꾸기', html: `<p>이번 판은 버리고 고른 지도에서 새로 시작합니다 (유산·환생 기록은 그대로, 포인트는 없음).</p>${mapPickerHtml(state.run.map)}`,
-    actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => {
+    actions: [{ label: '취소', onClick: () => { hideModal(); then && then(); } }, { label: '새로 시작', primary: true, onClick: () => {
       state.legacy.difficulty = pickedDifficulty(); restartOn(state, pickedMap(), Date.now() >>> 0); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); hideModal(); refresh();
     } }] });
 }
@@ -131,12 +167,15 @@ function openMenu() {
     title: '메뉴',
     html: `<p>유산 포인트 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회</p>
       <p>지도: ${(MAPS[state.run.map] || MAPS.hex).name} · 난이도 ${difficultyOf(state).name} <button data-action="map">지도·난이도 바꾸기</button></p>
-      <p><button data-action="shop">유산 상점</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
+      <p><button data-action="help">📖 도움말</button> <button data-action="shop">유산 상점</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
+      <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드 (구분 잘 되는 색 + 타일에 주인 글자)</label></p>
       <p><button data-action="reset" style="color:#eb5757">처음부터(전부 삭제)</button></p>`,
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
-    onBodyClick: a => {
+    onBodyClick: (a, el) => {
       if (a === 'shop') openShop();
       if (a === 'map') openMapChange();
+      if (a === 'help') openHelp();
+      if (a === 'cb') { state.legacy.colorblind = el.checked; setColorblind(el.checked); save(state); refresh(); }
       if (a === 'export') showModal({ title: '저장 내보내기', html: `<textarea readonly>${serialize(state)}</textarea><p>전체 선택해서 복사하세요.</p>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
       if (a === 'import') showModal({ title: '저장 가져오기', html: `<textarea id="import-text" placeholder="붙여넣기"></textarea><p id="import-msg"></p>`, actions: [
         { label: '취소', onClick: hideModal },
@@ -194,7 +233,7 @@ function settle(elapsedSec) {
 function loop(now) {
   const dt = Math.min(1, (now - last) / 1000); last = now;
   if (!ended) {
-    acc += dt;
+    acc += dt * (state.legacy.speed || 1); // 배속: 시뮬 시간만
     while (acc >= TICK) { tick(state, TICK); runAi(state, TICK); acc -= TICK; }
     trackGrowth(now / 1000);
     for (const e of effects) e.t += dt * (e.speed || 2.5);
@@ -213,6 +252,8 @@ async function init() {
   images = await loadAssets('assets/');
   centerOnCapital();
   setRatioButtons(state.run.sendRatio);
+  setSpeedButton(state.legacy.speed || 1);
+  setColorblind(state.legacy.colorblind);
   setHint(HINT_DEFAULT);
   bindButtons({
     onUpgrade: () => {
@@ -230,6 +271,8 @@ async function init() {
       else flashHint(key ? '골드가 부족하거나 이미 그 건물입니다' : '철거할 건물이 없습니다');
     },
     onCenter: centerOnCapital,
+    onHelp: openHelp,
+    onSpeed: () => { const i = SPEEDS.indexOf(state.legacy.speed || 1); state.legacy.speed = SPEEDS[(i + 1) % SPEEDS.length]; setSpeedButton(state.legacy.speed); save(state); flashHint(`배속 ×${state.legacy.speed} (오프라인 정산엔 영향 없음)`); },
   });
   attachCanvasInput(canvas, cam, { onTap, isSelectMode: () => multi, onDrag: (sx, sy) => {
     // 드래그 선택: 지나가는 내 땅을 추가 (빼는 건 탭)
@@ -242,7 +285,10 @@ async function init() {
     if (hiddenAt) { const elapsed = (Date.now() - hiddenAt) / 1000; hiddenAt = 0; last = performance.now(); acc = 0; if (!isModalOpen()) settle(elapsed); }
   });
   window.addEventListener('pagehide', () => save(state));
-  if (state.lastSave > 0) settle((Date.now() - state.lastSave) / 1000);
+  // 꺼둔 시간은 안내 창이 저장(lastSave 갱신)하기 전에 재둔다
+  const away = state.lastSave > 0 ? (Date.now() - state.lastSave) / 1000 : 0;
+  const resume = () => { if (away > 0) settle(away); };
+  if (state.lastSave > 0 && (state.legacy.seenFeatures || 0) < FEATURES) showWelcome(resume); else resume();
   requestAnimationFrame(loop);
 }
 init();

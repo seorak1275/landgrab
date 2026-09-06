@@ -6,6 +6,10 @@ export async function run(h) {
   await h.eval(`localStorage.clear()`); await h.goto(); await h.wait(800);
   say('layout', await h.eval(`JSON.stringify({docW: document.documentElement.scrollWidth, vw: innerWidth, vh: innerHeight, canvas: [document.getElementById('canvas').clientWidth, document.getElementById('canvas').clientHeight], menuRight: document.getElementById('btn-menu').getBoundingClientRect().right, ratioRight: document.getElementById('ratio').getBoundingClientRect().right, scale: __game.cam.scale.toFixed(2)})`));
   await h.shot(`${SP}/s1_initial.png`);
+  await h.eval(`document.getElementById('btn-speed').click()`); await h.wait(1100);
+  say('speed x2', await h.eval(`document.getElementById('btn-speed').textContent + ' elapsed=' + __game.state.run.elapsed.toFixed(1) + ' speed=' + __game.state.legacy.speed`));
+  await h.eval(`document.getElementById('btn-speed').click(); document.getElementById('btn-speed').click()`); await h.wait(100);
+  say('speed back', await h.eval(`document.getElementById('btn-speed').textContent`));
   // 수도 탭 → 패널
   const cap = await h.eval(`(() => { const t = __game.state.run.tiles.find(t => t.owner === 0); return JSON.stringify([t.q, t.r, t.id]); })()`);
   const [q, r, capId] = JSON.parse(cap);
@@ -21,6 +25,10 @@ export async function run(h) {
   // 특화 건물: 농장 버튼 → 수도에 farm
   await h.eval(`__game.state.run.gold[0] = 2000`); await h.wait(300);
   say('build row', await h.eval(`'hidden=' + document.getElementById('p-build').hidden + ' farm=' + document.getElementById('bd-farm').textContent + ' disabled=' + document.getElementById('bd-farm').disabled`));
+  await h.eval(`document.getElementById('bd-help').click()`); await h.wait(200);
+  say('help modal', await h.eval(`document.getElementById('modal-title').textContent + ' rows=' + document.querySelectorAll('#modal-body tr').length + ' first=' + document.querySelector('#modal-body h3').textContent.slice(0, 5)`));
+  await h.shot(`${SP}/s1c_help.png`);
+  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(100);
   await h.eval(`document.getElementById('bd-farm').click()`); await h.wait(300);
   say('after farm', await h.eval(`__game.state.run.tiles[${capId}].build + ' gold=' + Math.floor(__game.state.run.gold[0]) + ' title=' + document.getElementById('p-title').textContent`));
   await h.shot(`${SP}/s1b_build.png`);
@@ -40,8 +48,11 @@ export async function run(h) {
   // 저장 후 1시간 전으로 조작 → 오프라인 정산
   await h.wait(1200);
   // 페이지를 떠날 때 pagehide 저장이 덮어쓰지 않도록, 조작 뒤 이 페이지의 setItem을 막는다
-  await h.eval(`(() => { const s = JSON.parse(localStorage['landgrab.save.v1']); s.lastSave = Date.now() - 3600e3; localStorage['landgrab.save.v1'] = JSON.stringify(s); localStorage.setItem = () => {}; })()`);
+  await h.eval(`(() => { const s = JSON.parse(localStorage['landgrab.save.v1']); s.lastSave = Date.now() - 3600e3; delete s.legacy.seenFeatures; localStorage['landgrab.save.v1'] = JSON.stringify(s); localStorage.setItem = () => {}; })()`);
   await h.goto(); await h.wait(800);
+  say('welcome modal', await h.eval(`document.getElementById('modal-title').textContent + ' seen=' + __game.state.legacy.seenFeatures`));
+  await h.shot(`${SP}/s3b_welcome.png`);
+  await h.eval(`[...document.querySelectorAll('#modal-actions button')].find(b => b.textContent === '계속하기').click()`); await h.wait(300);
   say('offline modal', await h.eval(`document.getElementById('modal-title').textContent + ' / ' + document.getElementById('modal-body').innerText.replace(/\\n/g, ' ')`));
   await h.shot(`${SP}/s4_offline.png`);
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300);

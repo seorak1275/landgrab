@@ -17,7 +17,7 @@ test('생산·한도·비용 수식', () => {
   const c = capitalOf(s, PLAYER);
   near(goldRate(s, c), 0.5 * 3 * 1);
   near(soldierRate(s, c), 0.12);
-  near(cap(c), 40);
+  near(cap(c), 120);
   near(upgradeCost(c), 40 * 3);
   c.level = 3;
   near(upgradeCost(c), 40 * 1.7 ** 2 * 3);
@@ -42,9 +42,9 @@ test('tick: 골드 누적, 병사는 한도까지만, 초과분은 유지', () =
   near(s.run.gold[PLAYER], 100 + 15);
   near(c.soldiers, 31.2);
   tick(s, 1000);
-  near(c.soldiers, 40);
-  c.soldiers = 55; tick(s, 1);
-  near(c.soldiers, 55);
+  near(c.soldiers, 120);
+  c.soldiers = 155; tick(s, 1);
+  near(c.soldiers, 155);
   near(s.run.elapsed, 1011);
 });
 

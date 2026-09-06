@@ -82,8 +82,9 @@ export function setBuilding(state, tileId, key) {
   state.run.gold[t.owner] -= cost; t.build = key; t.auto = 0;
   return true;
 }
+export const CAP_BASE = 60; // 병사 한도 = CAP_BASE × 레벨 × 지형한도계수 (20이면 몇 분 만에 차서 생산이 버려진다는 피드백 → 3배. 방치 생존 18~41분, 활동적 정복 17~27분)
 export function cap(tile, state) {
-  return 20 * tile.level * TERRAIN[tile.terrain].cap * (1 + (building(tile, state && state.run).cap || 0)) * (state && tile.owner === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1);
+  return CAP_BASE * tile.level * TERRAIN[tile.terrain].cap * (1 + (building(tile, state && state.run).cap || 0)) * (state && tile.owner === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1);
 }
 // 수비 배율 = 1 + 지형 + 건물, 플레이어는 유산 '성벽술'·축복 곱
 export function defMul(state, tile) {

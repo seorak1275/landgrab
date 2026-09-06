@@ -120,7 +120,11 @@ export function flashHint(text, ms = 2000) {
   hintTimer = setTimeout(() => { hintTimer = 0; setText('hint', hintDefault); }, ms);
 }
 
-export function bindButtons({ onUpgrade, onRatio, onMenu, onMulti, onAll, onCenter, onBuild }) {
+export const SPEEDS = [1, 2, 4]; // 배속 (시뮬 시간만 빨라진다, 연출은 실시간)
+export function setSpeedButton(speed) { setText('btn-speed', `▶×${speed}`); $('btn-speed').classList.toggle('fast', speed > 1); }
+export function bindButtons({ onUpgrade, onRatio, onMenu, onMulti, onAll, onCenter, onBuild, onSpeed, onHelp }) {
+  $('btn-speed').addEventListener('click', () => onSpeed && onSpeed());
+  $('bd-help').addEventListener('click', () => onHelp && onHelp('build'));
   $('btn-upgrade').addEventListener('click', onUpgrade);
   document.querySelectorAll('[data-build]').forEach(b => b.addEventListener('click', () => onBuild && onBuild(b.dataset.build || null)));
   document.querySelectorAll('.ratio-btn').forEach(b => b.addEventListener('click', () => onRatio(Number(b.dataset.r))));

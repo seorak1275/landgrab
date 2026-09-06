@@ -4,9 +4,25 @@ import { MAPS } from './mapgen.js';
 import { regionHolders, battleAttackers, BUILDINGS } from './sim.js';
 
 export const HEX_SIZE = 36;
-export const FACTION_COLORS = ['#2f80ed', '#eb5757', '#f2c94c', '#9b51e0', '#27ae60'];
+// 세력 색. 색약 모드는 Okabe–Ito 팔레트(파랑·주황·노랑·분홍·주홍)로 바꾸고 타일에 주인 글자(나/A1/A2…)를 함께 찍는다
+const PALETTES = {
+  normal: ['#2f80ed', '#eb5757', '#f2c94c', '#9b51e0', '#27ae60'],
+  cb:     ['#0072B2', '#E69F00', '#F0E442', '#CC79A7', '#D55E00'],
+};
+export const FACTION_COLORS = [...PALETTES.normal];
 export const NEUTRAL_COLOR = '#777';
 const MARK_FILL = { win: 'rgba(111,227,143,0.35)', lose: 'rgba(255,123,123,0.3)', move: 'rgba(47,128,237,0.3)' };
+const MARK_TEXT = { win: '#6fe38f', lose: '#ff7b7b' };
+let colorblind = false;
+export function isColorblind() { return colorblind; }
+export function setColorblind(on) {
+  colorblind = !!on;
+  FACTION_COLORS.splice(0, FACTION_COLORS.length, ...PALETTES[on ? 'cb' : 'normal']);
+  MARK_FILL.win = on ? 'rgba(86,180,233,0.45)' : 'rgba(111,227,143,0.35)';
+  MARK_FILL.lose = on ? 'rgba(230,159,0,0.45)' : 'rgba(255,123,123,0.3)';
+  MARK_TEXT.win = on ? '#56B4E9' : '#6fe38f'; MARK_TEXT.lose = on ? '#E69F00' : '#ff7b7b';
+}
+export function ownerTag(owner) { return owner === NEUTRAL ? '' : owner === 0 ? '나' : `A${owner}`; }
 const TERRAIN_FILL = { plain: '#a8d08d', forest: '#5b8c5a', hill: '#c9a66b', mountain: '#8c8c8c', citadel: '#d9b382', sea: '#2d5f8f' };
 // 에셋 작업에서 실제 파일명으로 채움. 파일이 없으면 단색 육각형으로 그린다 (뱃길은 그림 없이 바다색)
 export const ASSET_FILES = { plain: 'plain.png', forest: 'forest.png', hill: 'hill.png', mountain: 'mountain.png', citadel: 'citadel.png' };
@@ -141,11 +157,17 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
           ctx.font = `${Math.round(size * 0.3)}px system-ui, sans-serif`;
           ctx.fillText(BUILDINGS[t.build].icon, cx - size * 0.55, cy + size * 0.55);
         }
+        if (colorblind) { // 색약 모드: 오른쪽 아래에 주인 글자
+          ctx.font = `bold ${Math.round(size * 0.26)}px system-ui, sans-serif`; ctx.lineWidth = 3;
+          ctx.fillStyle = ownerColor(t.owner);
+          ctx.strokeText(ownerTag(t.owner), cx + size * 0.55, cy + size * 0.55); ctx.fillText(ownerTag(t.owner), cx + size * 0.55, cy + size * 0.55);
+          ctx.fillStyle = '#fff';
+        }
       }
       if (mark && mark !== 'move' && !t.battle) {
         // 공격 미리보기: 위쪽에 ✓(이김) / ✕(짐)
         ctx.font = `bold ${Math.round(size * 0.4)}px system-ui, sans-serif`;
-        ctx.fillStyle = mark === 'win' ? '#6fe38f' : '#ff7b7b';
+        ctx.fillStyle = MARK_TEXT[mark];
         ctx.lineWidth = 3;
         const sym = mark === 'win' ? '✓' : '✕';
         ctx.strokeText(sym, cx, cy - size * 0.5); ctx.fillText(sym, cx, cy - size * 0.5);
