@@ -1,5 +1,6 @@
 import { TERRAIN, PLAYER, NEUTRAL } from './world.js';
-import { cap, goldRate, soldierRate, upgradeCost, MAX_LEVEL, regionHolders, heldRegions, regionCount, REGION_BONUS } from './sim.js';
+import { cap, goldRate, soldierRate, upgradeCost, MAX_LEVEL, regionHolders, heldRegions, regionCount, regionBonus, BUILDINGS, buildCost } from './sim.js';
+import { PERKS } from './perks.js';
 import { ownerColor } from './render.js';
 import { MAPS } from './mapgen.js';
 
@@ -28,17 +29,36 @@ export function updateTop(state, rate) {
 export function upgradePlan(state, tiles) {
   const plan = []; let gold = state.run.gold[PLAYER], total = 0;
   for (const t of [...tiles].filter(t => t.level < MAX_LEVEL).sort((a, b) => a.level - b.level)) {
-    const c = upgradeCost(t);
+    const c = upgradeCost(t, state);
     if (gold < c) break;
     gold -= c; total += c; plan.push(t);
   }
   return { tiles: plan, cost: total };
 }
 
+// 특화 건물 버튼 줄: 선택한 내 땅에 대해 (비용 합계, 이미 지은 것 표시). 내 땅이 없으면 숨김
+function updateBuildRow(state, selected) {
+  const row = $('p-build'); if (!row) return;
+  if (!selected.length) { row.hidden = true; return; }
+  row.hidden = false;
+  const gold = state.run.gold[PLAYER];
+  for (const b of row.querySelectorAll('[data-build]')) {
+    const key = b.dataset.build;
+    if (!key) { const any = selected.some(t => t.build); b.disabled = !any; continue; }
+    const need = selected.filter(t => t.build !== key);
+    const cost = need.reduce((s, t) => s + buildCost(state, t), 0);
+    const all = need.length === 0;
+    b.classList.toggle('active', all);
+    b.disabled = all || gold < (need.length ? buildCost(state, need[0]) : 0);
+    setText(b.id, `${BUILDINGS[key].icon}${BUILDINGS[key].name}${all ? ' ✓' : ` 💰${formatNum(cost)}`}`);
+  }
+}
+
 export function updatePanel(state, { selected = [], inspect = null, multi = false, ratio = 0.5 } = {}) {
   const btn = $('btn-upgrade');
   const setBtn = (disabled, text) => { if (btn.disabled !== disabled) btn.disabled = disabled; setText('btn-upgrade', text); };
   $('btn-multi').classList.toggle('active', multi);
+  updateBuildRow(state, selected);
   if (selected.length > 1) {
     const soldiers = selected.reduce((s, t) => s + t.soldiers, 0);
     setHtml('p-title', `<span style="color:${ownerColor(PLAYER)}">■</span> 내 땅 ${selected.length}개 선택`);
@@ -52,26 +72,30 @@ export function updatePanel(state, { selected = [], inspect = null, multi = fals
   const run = state.run;
   if (!tile) {
     const map = MAPS[run.map] || MAPS.hex;
+    const perk = PERKS[run.perk];
     setText('p-title', `${map.name} · 타일을 탭하세요`);
-    setText('p-stats', run.regions ? `★ 완전 점령 지역 ${heldRegions(run, PLAYER)} / ${regionCount(run)}
-한 지역(${run.map === 'seoul' ? '구' : '시·도'})을 전부 가지면 그 지역 생산 +${Math.round(REGION_BONUS * 100)}% (2칸 이상인 지역만)` : '');
+    const lines = [];
+    if (run.regions) lines.push(`★ 완전 점령 지역 ${heldRegions(run, PLAYER)} / ${regionCount(run)} · 전부 가지면 그 지역 생산 +${Math.round(regionBonus(state, PLAYER) * 100)}% (2칸 이상인 지역만)`);
+    if (perk) lines.push(`${perk.icon} 이번 판 축복: ${perk.name} — ${perk.desc}`);
+    setText('p-stats', lines.join('\n'));
     setBtn(true, '업그레이드'); return;
   }
   const tr = TERRAIN[tile.terrain];
   const regionName = run.regions && tile.region >= 0 ? run.regions[tile.region] + ' · ' : '';
-  setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${regionName}${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}`);
+  const bld = BUILDINGS[tile.build];
+  setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${regionName}${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}${bld ? ` · ${bld.icon}${bld.name}` : ''}`);
   const mine = tile.owner === PLAYER;
-  const lines = [`병사 ${Math.floor(tile.soldiers)} / ${Math.floor(cap(tile))}`, `방어 +${Math.round(tr.def * 100)}%`];
+  const lines = [`병사 ${Math.floor(tile.soldiers)} / ${Math.floor(cap(tile, state))}`, `방어 +${Math.round((tr.def + (bld ? bld.def || 0 : 0)) * 100)}%${bld ? ` · ${bld.desc}` : ''}`];
   if (run.regions && tile.region >= 0) {
     const h = regionHolders(run)[tile.region];
-    if (h !== null && h !== undefined && h !== NEUTRAL) lines.push(`★ ${run.regions[tile.region]} 완전 점령 (${ownerName(h)}) · 생산 +${Math.round(REGION_BONUS * 100)}%`);
+    if (h !== null && h !== undefined && h !== NEUTRAL) lines.push(`★ ${run.regions[tile.region]} 완전 점령 (${ownerName(h)}) · 생산 +${Math.round(regionBonus(state, h) * 100)}%`);
   }
   if (tile.battle && tile.battle.parties.length) lines.push(`⚔ ${tile.battle.parties.length > 1 ? '난전' : '전투 중'}: ${tile.battle.parties.map(p => `${ownerName(p.owner)} ${Math.floor(p.soldiers)}`).join(' · ')} vs 수비 ${Math.floor(tile.soldiers)} · 더 보내면 합류`);
   if (mine) lines.push(`생산 골드 ${goldRate(state, tile).toFixed(2)}/초 · 병사 ${soldierRate(state, tile).toFixed(2)}/초`);
   else lines.push(`점령하려면 ${Math.floor(tile.soldiers * (1 + tr.def)) + 1}명 넘게 보내야 함`);
   setText('p-stats', lines.join('\n'));
   if (mine && tile.level < MAX_LEVEL) {
-    const cost = upgradeCost(tile);
+    const cost = upgradeCost(tile, state);
     setBtn(state.run.gold[PLAYER] < cost, `업그레이드 Lv.${tile.level + 1} (💰 ${formatNum(cost)})`);
   } else setBtn(true, mine ? '최대 레벨' : '업그레이드');
 }
@@ -88,8 +112,9 @@ export function flashHint(text, ms = 2000) {
   hintTimer = setTimeout(() => { hintTimer = 0; setText('hint', hintDefault); }, ms);
 }
 
-export function bindButtons({ onUpgrade, onRatio, onMenu, onMulti, onAll, onCenter }) {
+export function bindButtons({ onUpgrade, onRatio, onMenu, onMulti, onAll, onCenter, onBuild }) {
   $('btn-upgrade').addEventListener('click', onUpgrade);
+  document.querySelectorAll('[data-build]').forEach(b => b.addEventListener('click', () => onBuild && onBuild(b.dataset.build || null)));
   document.querySelectorAll('.ratio-btn').forEach(b => b.addEventListener('click', () => onRatio(Number(b.dataset.r))));
   $('btn-menu').addEventListener('click', onMenu);
   $('btn-multi').addEventListener('click', onMulti);

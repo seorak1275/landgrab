@@ -94,16 +94,16 @@ test('지역 완전 점령 보너스: 전부 가지면 +50%, 하나라도 남의
   const cap = s.run.tiles.find(t => t.owner === PLAYER);
   const mates = s.run.tiles.filter(t => t.region === cap.region);
   assert.ok(mates.length > 1);
-  assert.equal(regionMul(s.run, cap), 1);
+  assert.equal(regionMul(s, cap), 1);
   for (const t of mates) t.owner = PLAYER;
-  assert.equal(regionMul(s.run, cap), 1 + REGION_BONUS);
+  assert.equal(regionMul(s, cap), 1 + REGION_BONUS);
   assert.equal(heldRegions(s.run, PLAYER), 1);
   const g1 = goldRate(s, cap), r1 = soldierRate(s, cap);
   mates[0].owner = 1;
-  assert.equal(regionMul(s.run, cap), 1); assert.equal(goldRate(s, cap) * 1.5, g1); assert.equal(soldierRate(s, cap) * 1.5, r1);
+  assert.equal(regionMul(s, cap), 1); assert.equal(goldRate(s, cap) * 1.5, g1); assert.equal(soldierRate(s, cap) * 1.5, r1);
   const h = makeState(3, 0, {}, 'hex');
   assert.equal(regionHolders(h.run), null);
-  assert.equal(regionMul(h.run, h.run.tiles.find(t => t.owner === PLAYER)), 1);
+  assert.equal(regionMul(h, h.run.tiles.find(t => t.owner === PLAYER)), 1);
   assert.equal(heldRegions(h.run, PLAYER), 0);
 });
 
@@ -112,7 +112,7 @@ test('타일 1개짜리 지역은 혼자 다 가져도 보너스 없음, regionC
   const counts = {}; for (const t of s.run.tiles) if (t.region >= 0) counts[t.region] = (counts[t.region] || 0) + 1;
   const single = s.run.tiles.find(t => counts[t.region] === 1);
   assert.ok(single); single.owner = PLAYER;
-  assert.equal(regionMul(s.run, single), 1);
+  assert.equal(regionMul(s, single), 1);
   assert.equal(regionCount(s.run), Object.values(counts).filter(c => c >= 2).length);
   assert.ok(regionCount(s.run) < Object.keys(counts).length);
 });
@@ -121,7 +121,7 @@ test('중립만 있는 지역은 중립이 보유자지만 보너스는 없다',
   const s = makeState(3, 0, {}, 'seoul');
   const t = s.run.tiles.find(t => t.owner === NEUTRAL && t.region >= 0 && s.run.tiles.filter(x => x.region === t.region).every(x => x.owner === NEUTRAL));
   assert.ok(t);
-  assert.equal(regionMul(s.run, t), 1);
+  assert.equal(regionMul(s, t), 1);
   const g = s.run.gold[PLAYER];
   tick(s, 1); assert.ok(s.run.gold[PLAYER] > g);
 });

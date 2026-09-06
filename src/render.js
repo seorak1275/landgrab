@@ -1,7 +1,7 @@
 import { hexToPixel, hexCorners, pixelToHex, DIRS, key } from './hex.js';
 import { NEUTRAL } from './world.js';
 import { MAPS } from './mapgen.js';
-import { regionHolders, battleAttackers } from './sim.js';
+import { regionHolders, battleAttackers, BUILDINGS } from './sim.js';
 
 export const HEX_SIZE = 36;
 export const FACTION_COLORS = ['#2f80ed', '#eb5757', '#f2c94c', '#9b51e0', '#27ae60'];
@@ -137,6 +137,10 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
         ctx.lineWidth = 2;
         const lv = `Lv${t.level}`;
         ctx.strokeText(lv, cx, cy + size * 0.55); ctx.fillText(lv, cx, cy + size * 0.55);
+        if (t.build && BUILDINGS[t.build]) { // 특화 건물 아이콘: 왼쪽 아래
+          ctx.font = `${Math.round(size * 0.3)}px system-ui, sans-serif`;
+          ctx.fillText(BUILDINGS[t.build].icon, cx - size * 0.55, cy + size * 0.55);
+        }
       }
       if (mark && mark !== 'move' && !t.battle) {
         // 공격 미리보기: 위쪽에 ✓(이김) / ✕(짐)

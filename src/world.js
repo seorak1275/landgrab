@@ -1,6 +1,7 @@
 import { mulberry32, pick } from './rng.js';
 import { tilesInRadius, corners, distance, key } from './hex.js';
 import { MAPS, buildMap } from './mapgen.js';
+import { PERKS } from './perks.js';
 
 export const TERRAIN = {
   plain:    { name: '평지', gold: 1.0, def: 0,   cap: 1.0 },
@@ -31,10 +32,12 @@ function layout(mapKey, radius, factions) {
   return { ...b, regions: b.map.regions.map(r => r.name), terrainWeights: b.map.regions.map(r => r.terrain ? Object.entries(r.terrain) : null) };
 }
 
-export function generateRun(seed, prestige, upgrades = {}, mapKey = 'hex') {
+export function generateRun(seed, prestige, upgrades = {}, mapKey = 'hex', perk = null) {
   const rand = mulberry32(seed);
   const radius = radiusFor(prestige);
-  const aiCount = aiCountFor(prestige);
+  const pk = PERKS[perk] || {};
+  const aiCount = Math.max(1, aiCountFor(prestige) + (pk.aiDelta || 0));
+  const garrisonMul = (1 - 0.04 * (upgrades.garrison || 0)) * (pk.garrison || 1); // 유산 '개척'·축복 '정찰'
   const factions = 1 + aiCount;
   const lay = layout(mapKey, radius, factions);
   const capitals = lay.capitals;
@@ -46,15 +49,16 @@ export function generateRun(seed, prestige, upgrades = {}, mapKey = 'hex') {
     const terrain = owner !== NEUTRAL ? 'citadel' : sea ? 'sea' : pick(rand, weights);
     // 중립 수비는 "가장 가까운 수도"에서 먼 만큼 세진다 — 플레이어 수도 기준으로만 하면 AI 옆 땅이 145명이라 AI가 10분 넘게 못 움직였음
     const soldiers = owner === NEUTRAL
-      ? neutralGarrison(Math.min(...capitals.map(c => distance([q, r], c))), prestige)
-      : 30 + (owner === PLAYER ? 20 * (upgrades.startArmy || 0) : 0);
+      ? Math.round(neutralGarrison(Math.min(...capitals.map(c => distance([q, r], c))), prestige) * garrisonMul)
+      : owner === PLAYER ? (30 + 20 * (upgrades.startArmy || 0)) * (pk.startArmy || 1) : 30;
     return { id, q, r, terrain, owner, level: 1, soldiers, region };
   });
   return {
     seed, radius, factions, tiles,
     map: mapKey in MAPS ? mapKey : 'hex',
     ...(lay.regions ? { regions: lay.regions, cell: lay.cell } : {}),
-    gold: Array(factions).fill(100),
+    gold: [100 + 100 * (upgrades.startGold || 0) + (pk.startGold || 0), ...Array(factions - 1).fill(100)],
+    ...(perk && PERKS[perk] ? { perk } : {}),
     aiTimers: Array(factions).fill(0),
     armies: [], // 행군 중인 부대 (sim.js)
     maxTilesOwned: 1,

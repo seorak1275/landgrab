@@ -18,6 +18,12 @@ export async function run(h) {
   const ub = JSON.parse(await h.eval(`(() => { const b = document.getElementById('btn-upgrade').getBoundingClientRect(); return JSON.stringify([b.x + b.width / 2, b.y + b.height / 2]); })()`));
   await h.click(ub[0], ub[1]);
   say('level after upgrade', await h.eval(`__game.state.run.tiles[${capId}].level`));
+  // 특화 건물: 농장 버튼 → 수도에 farm
+  await h.eval(`__game.state.run.gold[0] = 2000`); await h.wait(300);
+  say('build row', await h.eval(`'hidden=' + document.getElementById('p-build').hidden + ' farm=' + document.getElementById('bd-farm').textContent + ' disabled=' + document.getElementById('bd-farm').disabled`));
+  await h.eval(`document.getElementById('bd-farm').click()`); await h.wait(300);
+  say('after farm', await h.eval(`__game.state.run.tiles[${capId}].build + ' gold=' + Math.floor(__game.state.run.gold[0]) + ' title=' + document.getElementById('p-title').textContent`));
+  await h.shot(`${SP}/s1b_build.png`);
   // 이웃 중립 공격(수도 선택 상태에서 이웃 탭)
   const nb = JSON.parse(await h.eval(`(() => { const t = __game.state.run.tiles[${capId}]; const dirs = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]]; for (const [dq, dr] of dirs) { const n = __game.state.run.tiles.find(x => x.q === t.q + dq && x.r === t.r + dr); if (n) { n.soldiers = 3; const c = document.getElementById('canvas').getBoundingClientRect(); const cam = __game.cam; const s = ${Math.sqrt(3)} * 36 * (n.q + n.r / 2), y = 1.5 * 36 * n.r; return JSON.stringify([c.left + (s - cam.x) * cam.scale + c.width / 2, c.top + (y - cam.y) * cam.scale + c.height / 2, n.id]); } } })()`));
   await h.tap(nb[0], nb[1]);
@@ -81,10 +87,11 @@ export async function run(h) {
   if (!(await h.eval(`document.getElementById('modal').hidden`))) { await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); }
   // 정복 → 환생
   await h.eval(`__game.state.run.tiles.forEach(t => t.owner = 0)`); await h.wait(600);
-  say('conquest modal', await h.eval(`document.getElementById('modal-title').textContent`));
+  say('conquest modal', await h.eval(`document.getElementById('modal-title').textContent + ' perks=' + document.querySelectorAll('input[name=perk]').length + ' maps=' + document.querySelectorAll('input[name=map]').length + ' diffs=' + document.querySelectorAll('input[name=diff]').length`));
+  await h.eval(`document.querySelectorAll('input[name=perk]')[1].click(); document.querySelector('input[name=diff][value=hard]').click()`);
   await h.shot(`${SP}/s5_conquest.png`);
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300);
-  say('after rebirth', await h.eval(`document.getElementById('modal-title').textContent + ' | prestige=' + __game.state.legacy.prestigeCount + ' points=' + __game.state.legacy.points + ' tiles=' + __game.state.run.tiles.length`));
+  say('after rebirth', await h.eval(`document.getElementById('modal-title').textContent + ' | prestige=' + __game.state.legacy.prestigeCount + ' points=' + __game.state.legacy.points + ' tiles=' + __game.state.run.tiles.length + ' perk=' + __game.state.run.perk + ' diff=' + __game.state.legacy.difficulty + ' shopRows=' + document.querySelectorAll('.shop-row').length`));
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300);
   await h.shot(`${SP}/s6_new_run.png`);
   say('console errors', JSON.stringify(h.errors()));

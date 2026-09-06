@@ -1,7 +1,8 @@
 import { TERRAIN, NEUTRAL, PLAYER } from './world.js';
+import { perkOf } from './perks.js';
 import { neighborIds, cap, upgrade, upgradeCost, send, dispatch, bfsOwn, attackMul, effectiveDefense, battleParty, MAX_LEVEL } from './sim.js';
 
-export function aiPeriod(state) { return 8 * (1 + 0.08 * (state.legacy.upgrades.aiSlow || 0)); }
+export function aiPeriod(state) { return 8 * (1 + 0.08 * (state.legacy.upgrades.aiSlow || 0)) * (perkOf(state).aiSlow || 1); }
 export const AI_GATHER_EVERY = 4; // 몇 주기마다 집결 공격을 시도하는지
 export const AI_GATHER_RATIO = 0.4; // 집결 시 각 타일에서 떼는 비율
 // 중립을 먼저, 그다음은 플레이어·다른 AI 가리지 않고 수비 약한 쪽 (플레이어 우선이면 AI 둘이 협공해 활동적인 플레이어도 30분대에 전멸했음)
@@ -31,7 +32,7 @@ export function aiAct(state, f) {
     for (const nid of neighborIds(run, t)) {
       const n = run.tiles[nid];
       if (n.owner === f || othersBattle(n, f)) continue;
-      const D = effectiveDefense(n, f);
+      const D = effectiveDefense(state, n, f);
       if (t.soldiers * 0.8 * am > D * 1.4) options.push({ from: t, to: n, D });
     }
   }
@@ -41,7 +42,7 @@ export function aiAct(state, f) {
     if (attacks >= 2) break;
     if (o.to.owner === f) continue;
     // 앞선 공격으로 병사가 줄었을 수 있으니 현재 값으로 다시 확인
-    const D = effectiveDefense(o.to, f);
+    const D = effectiveDefense(state, o.to, f);
     if (!(o.from.soldiers * 0.8 * am > D * 1.4)) continue;
     send(state, o.from.id, o.to.id, 0.8);
     attacks++;
@@ -61,7 +62,7 @@ export function aiAct(state, f) {
     for (const t of mine()) for (const nid of neighborIds(run, t)) {
       const n = run.tiles[nid];
       if (n.owner === f || othersBattle(n, f)) continue;
-      const D = effectiveDefense(n, f), comp = compCache.get(t.id);
+      const D = effectiveDefense(state, n, f), comp = compCache.get(t.id);
       if (!(comp.amount * am > D * 1.5)) continue;
       const cand = { to: n, D, ids: comp.ids };
       if (!best || priority(cand.to.owner) - priority(best.to.owner) < 0 || (priority(cand.to.owner) === priority(best.to.owner) && cand.D < best.D)) best = cand;

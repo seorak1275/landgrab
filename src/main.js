@@ -1,5 +1,6 @@
 import { PLAYER, TERRAIN } from './world.js';
-import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener } from './sim.js';
+import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener, setBuilding, BUILDINGS } from './sim.js';
+import { PERKS, offerPerks } from './perks.js';
 import { runAi } from './ai.js';
 import { simulateOffline } from './offline.js';
 import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn } from './prestige.js';
@@ -86,6 +87,12 @@ function mapPickerHtml(current) {
 }
 function pickedMap() { const el = document.querySelector('input[name="map"]:checked'); return el ? el.value : state.run.map; }
 function pickedDifficulty() { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : (state.legacy.difficulty || DEFAULT_DIFFICULTY); }
+// 환생 축복 3개 중 하나 (시드로 정해짐)
+function perkPickerHtml(seed) {
+  const keys = offerPerks(seed);
+  return `<p class="sub">이번 판 축복 (하나 선택)</p><div class="perk-row">${keys.map((k, i) => `<label><input type="radio" name="perk" value="${k}" ${i === 0 ? 'checked' : ''}><b>${PERKS[k].icon} ${PERKS[k].name}</b><span class="desc">${PERKS[k].desc}</span></label>`).join('')}</div>`;
+}
+function pickedPerk() { const el = document.querySelector('input[name="perk"]:checked'); return el ? el.value : null; }
 function openMapChange() {
   showModal({ title: '지도 바꾸기', html: `<p>이번 판은 버리고 고른 지도에서 새로 시작합니다 (유산·환생 기록은 그대로, 포인트는 없음).</p>${mapPickerHtml(state.run.map)}`,
     actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => {
@@ -163,10 +170,11 @@ function checkEnd() {
   if (st === 'playing') return;
   ended = true;
   const pts = pointsFor(state, st);
+  const seed = Date.now() >>> 0;
   showModal({
     title: st === 'conquered' ? '🎉 지도 정복!' : '💀 전멸…',
-    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b></p><p>환생하면 지도가 초기화되고 유산 상점에서 영구 보너스를 살 수 있습니다.</p><p>다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
-    actions: [{ label: '환생', primary: true, onClick: () => { const mk = pickedMap(), dk = pickedDifficulty(); state.legacy.difficulty = dk; rebirth(state, st, Date.now() >>> 0, mk); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
+    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b></p><p>환생하면 지도가 초기화되고 유산 상점에서 영구 보너스를 살 수 있습니다.</p>${perkPickerHtml(seed)}<p class="sub">다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
+    actions: [{ label: '환생', primary: true, onClick: () => { const mk = pickedMap(), dk = pickedDifficulty(), pk = pickedPerk(); state.legacy.difficulty = dk; rebirth(state, st, seed, mk, pk); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
   });
 }
 
@@ -216,6 +224,11 @@ async function init() {
     onMenu: openMenu,
     onMulti: () => { multi = !multi; inspectId = null; if (multi) flashHint('내 땅 위를 쭉 그으면 한 번에 선택 · 지도 이동은 두 손가락', 3000); refresh(); },
     onAll: () => { sel = state.run.tiles.filter(t => t.owner === PLAYER).map(t => t.id); inspectId = null; refresh(); },
+    onBuild: key => {
+      let n = 0; for (const t of tilesOf(sel)) if (setBuilding(state, t.id, key)) n++;
+      if (n) { save(state); flashHint(key ? `${BUILDINGS[key].icon} ${BUILDINGS[key].name} ${n}곳 · ${BUILDINGS[key].desc} (점령당하면 부서짐)` : `철거 ${n}곳`); refresh(); }
+      else flashHint(key ? '골드가 부족하거나 이미 그 건물입니다' : '철거할 건물이 없습니다');
+    },
     onCenter: centerOnCapital,
   });
   attachCanvasInput(canvas, cam, { onTap, isSelectMode: () => multi, onDrag: (sx, sy) => {
