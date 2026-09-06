@@ -16,6 +16,13 @@ const TERRAIN = {
   // 서울은 도시라 산악 배정을 약하게 (강북·도봉을 MT로 두면 산(방어 +100%)이 몰려 탐욕 스크립트가 2시간에 정복 못 하는 시드가 있었음)
   seoul: { 은평구: MIXED, 종로구: MIXED, 성북구: MIXED, 강북구: HILLY, 도봉구: HILLY, 노원구: MIXED, 관악구: MIXED, 서초구: MIXED },
 };
+// 지역 특성(trait): 건물 효율과 중립 수비에 반영 (sim.js TRAITS). 산악=성벽·망루, 평야=농장, 도시=병영, 해안=망루·행군
+const TRAITS = {
+  korea: { 강원: 'mountain', 경북: 'mountain', 충북: 'mountain', 제주: 'mountain', 전북: 'plain', 충남: 'plain', 경기: 'plain', 전남: 'plain',
+    서울: 'city', 대구: 'city', 광주: 'city', 대전: 'city', 세종: 'city', 부산: 'coast', 인천: 'coast', 울산: 'coast', 경남: 'coast' },
+  seoul: { 강북구: 'mountain', 도봉구: 'mountain', 노원구: 'mountain', 은평구: 'mountain', 관악구: 'mountain', 강서구: 'plain', 양천구: 'plain', 구로구: 'plain',
+    중구: 'city', 종로구: 'city', 용산구: 'city', 영등포구: 'city', 강남구: 'city', 서초구: 'city', 송파구: 'city', 마포구: 'city', 성동구: 'city', 동대문구: 'city', 광진구: 'coast', 강동구: 'coast', 동작구: 'coast', 서대문구: 'city', 중랑구: 'plain', 성북구: 'mountain', 금천구: 'plain' },
+};
 const CONFIG = {
   korea: { name: '대한민국', home: [128.4657, 38.1194], homeName: '설악산', minArea: 0.001, tol: 0.004, maxLon: 130 }, // 면적 0.001(≈235km²) 미만 섬 제외, 울릉도·독도는 격자에 안 잡혀 제외
   seoul: { name: '서울특별시', home: [126.8495, 37.5509], homeName: '강서구', minArea: 0, tol: 0.003, maxLon: 999 },
@@ -58,11 +65,11 @@ for (const key of Object.keys(SRC)) {
       .filter(r => r.every(([x]) => x <= cfg.maxLon)).map(r => r.map(proj));
     const areas = rings.map(ringArea), maxA = Math.max(...areas);
     const polys = rings.filter((r, i) => areas[i] === maxA || areas[i] >= cfg.minArea).map(r => simplify(r, cfg.tol).map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]));
-    regions.push({ name, full, area: areas.reduce((s, a) => s + a, 0), polys, terrain: (TERRAIN[key] || {})[name] });
+    regions.push({ name, full, area: areas.reduce((s, a) => s + a, 0), polys, terrain: (TERRAIN[key] || {})[name], trait: (TRAITS[key] || {})[name] });
   }
   regions.sort((a, b) => a.area - b.area); // 작은 지역부터: 도(道) 안의 광역시가 먼저 잡히게
   const out = { key, name: cfg.name, width: 1, height: +Hh.toFixed(4), home: proj(cfg.home).map(v => +v.toFixed(4)), homeName: cfg.homeName,
-    regions: regions.map(r => ({ name: r.name, polys: r.polys, ...(r.terrain ? { terrain: r.terrain } : {}) })) };
+    regions: regions.map(r => ({ name: r.name, polys: r.polys, ...(r.terrain ? { terrain: r.terrain } : {}), ...(r.trait ? { trait: r.trait } : {}) })) };
   const pts = out.regions.reduce((s, r) => s + r.polys.reduce((t, p) => t + p.length, 0), 0);
   const js = `// ${cfg.name} 행정구역 (tools/build_maps.mjs 로 생성, 직접 고치지 말 것) — 지역 ${out.regions.length}개, 꼭짓점 ${pts}개\nexport default ${JSON.stringify(out)};\n`;
   mkdirSync('src/maps', { recursive: true });

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeState, capitalOf, settle } from './helpers.js';
 import { PLAYER, NEUTRAL, generateRun, aiCountFor, neutralGarrison } from '../src/world.js';
-import { BUILDINGS, buildCost, setBuilding, cap, goldRate, soldierRate, upgradeCost, defMul, attackMul, armySpeed, regionBonus, runTowers, tick, send, neighborIds, predictAttack, ARMY_SPEED, REGION_BONUS } from '../src/sim.js';
+import { BUILDINGS, buildCost, setBuilding, cap, goldRate, soldierRate, upgradeCost, defMul, attackMul, armySpeed, regionBonus, runTowers, tick, send, neighborIds, predictAttack, ARMY_SPEED, REGION_BONUS, buildMul, building, bestBuilding, traitOf, TRAITS } from '../src/sim.js';
 import { PERKS, perkOf, offerPerks } from '../src/perks.js';
 import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth } from '../src/prestige.js';
 import { aiPeriod } from '../src/ai.js';
@@ -26,16 +26,48 @@ test('건물: 비용 = 150×지형골드계수, 골드 차감, 같은 건물 재
   assert.equal(setBuilding(s, c.id, 'nope'), false);
 });
 
-test('건물 효과: 농장 골드 +60%, 병영 병사 +60%·출발 공격 +15%, 성벽 방어 +50%·한도 +25%, 망루 방어 +20%', () => {
+test('건물 효과(평지, 특성 없음): 농장 골드 +60%×1.3, 병영 병사 +60%·출발 공격 +15%, 성벽 방어 +50%·한도 +25%, 망루 방어 +20%', () => {
   const s = makeState(); const c = capitalOf(s, PLAYER); s.run.gold[PLAYER] = 1e6;
-  const g0 = goldRate(s, c), r0 = soldierRate(s, c), cap0 = cap(c, s), d0 = defMul(s, c);
-  setBuilding(s, c.id, 'farm'); near(goldRate(s, c), g0 * 1.6); near(soldierRate(s, c), r0);
-  setBuilding(s, c.id, 'barracks'); near(soldierRate(s, c), r0 * 1.6); near(goldRate(s, c), g0);
-  const t = s.run.tiles[neighborIds(s.run, c)[0]]; t.soldiers = 5; c.soldiers = 40;
-  send(s, c.id, t.id, 0.5); near(s.run.armies[0].am, 1.15); s.run.armies = [];
-  setBuilding(s, c.id, 'wall'); near(defMul(s, c), d0 + 0.5); near(cap(c, s), cap0 * 1.25);
-  setBuilding(s, c.id, 'tower'); near(defMul(s, c), d0 + 0.2);
+  const t = s.run.tiles[neighborIds(s.run, c)[0]]; t.owner = PLAYER; t.terrain = 'plain'; t.soldiers = 40;
+  const g0 = goldRate(s, t), r0 = soldierRate(s, t), cap0 = cap(t, s), d0 = defMul(s, t);
+  setBuilding(s, t.id, 'farm'); near(goldRate(s, t), g0 * (1 + 0.6 * 1.3)); near(soldierRate(s, t), r0); // 평지 농장 친화 ×1.3
+  setBuilding(s, t.id, 'barracks'); near(soldierRate(s, t), r0 * 1.6); near(goldRate(s, t), g0);
+  const u = s.run.tiles[neighborIds(s.run, t).find(id => id !== c.id)]; u.soldiers = 5;
+  send(s, t.id, u.id, 0.5); near(s.run.armies[0].am, 1.15); s.run.armies = [];
+  setBuilding(s, t.id, 'wall'); near(defMul(s, t), d0 + 0.5); near(cap(t, s), cap0 * 1.25);
+  setBuilding(s, t.id, 'tower'); near(defMul(s, t), d0 + 0.2);
   assert.equal(Object.keys(BUILDINGS).length, 4);
+});
+
+test('지형 친화도: 산엔 성벽·망루 ×1.5·농장 ×0.5, 성채엔 병영 ×1.3, 망루 주기는 배율만큼 짧아진다(최소 4초)', () => {
+  const s = makeState(); const c = capitalOf(s, PLAYER); s.run.gold[PLAYER] = 1e6;
+  near(buildMul(s.run, c, 'barracks'), 1.3); near(buildMul(s.run, c, 'farm'), 1);
+  const t = s.run.tiles[neighborIds(s.run, c)[0]]; t.owner = PLAYER; t.terrain = 'mountain';
+  near(buildMul(s.run, t, 'wall'), 1.5); near(buildMul(s.run, t, 'tower'), 1.5); near(buildMul(s.run, t, 'farm'), 0.5);
+  assert.equal(bestBuilding(s.run, t).key, 'wall'); assert.equal(bestBuilding(s.run, c).key, 'barracks');
+  setBuilding(s, t.id, 'wall'); near(building(t, s.run).def, 0.75); near(defMul(s, t), 2 + 0.75);
+  setBuilding(s, t.id, 'tower'); near(building(t, s.run).auto, 8 / 1.5);
+  t.terrain = 'plain'; near(building(t, s.run).auto, 8);
+  assert.equal(traitOf(s.run, t), null); // 육각 평원엔 지역 특성 없음
+});
+
+test('지역 특성: 대한민국 강원은 산악(성벽·망루 ×1.5, 중립 수비 ×1.25), 전북은 평야(농장 ×1.5)', () => {
+  const s = makeState(1, 6, {}, 'korea'); const run = s.run;
+  const idx = name => run.regions.indexOf(name);
+  assert.equal(run.traits[idx('강원')], 'mountain'); assert.equal(run.traits[idx('전북')], 'plain'); assert.equal(run.traits[idx('서울')], 'city');
+  const gw = run.tiles.find(t => t.region === idx('강원') && t.terrain === 'plain');
+  const jb = run.tiles.find(t => t.region === idx('전북') && t.terrain === 'plain');
+  assert.ok(gw && jb);
+  near(buildMul(run, gw, 'wall'), 1.5); near(buildMul(run, gw, 'farm'), 1.3 * 0.5);
+  near(buildMul(run, jb, 'farm'), 1.3 * 1.5); near(buildMul(run, jb, 'wall'), 0.6);
+  assert.equal(traitOf(run, gw), TRAITS.mountain);
+  // 중립 수비: 산악 지역은 공식 ×1.25
+  const gm = run.tiles.filter(t => t.owner === NEUTRAL && t.region === idx('강원'));
+  assert.ok(gm.length);
+  for (const t of gm) {
+    const d = Math.min(...run.tiles.filter(x => x.owner !== NEUTRAL).map(x => Math.max(Math.abs(x.q - t.q), Math.abs(x.r - t.r), Math.abs(x.q + x.r - t.q - t.r))));
+    assert.equal(t.soldiers, Math.round(neutralGarrison(d, 6) * 1.25));
+  }
 });
 
 test('망루: 8초마다 60%로 여유 있게 이기는 옆 땅을 자동 공격 (중립 먼저), 못 이기면 가만히', () => {

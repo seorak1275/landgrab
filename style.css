@@ -21,6 +21,8 @@ button { font: inherit; }
 #p-build { display: flex; gap: 4px; margin-top: 6px; }
 #p-build[hidden] { display: none; }
 #p-build button { flex: 1; padding: 6px 2px; border-radius: 8px; border: 1px solid #555; background: none; color: #ddd; font-size: 11px; white-space: nowrap; }
+#p-build button.good { border-color: #6fe38f; color: #6fe38f; }
+#p-build button.bad { border-color: #664; color: #887; }
 #p-build button.active { background: #27ae60; border-color: #27ae60; color: #fff; }
 #p-build button:disabled { color: #666; }
 #p-build button.active:disabled { color: #fff; }

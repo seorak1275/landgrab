@@ -226,7 +226,7 @@ async function init() {
     onAll: () => { sel = state.run.tiles.filter(t => t.owner === PLAYER).map(t => t.id); inspectId = null; refresh(); },
     onBuild: key => {
       let n = 0; for (const t of tilesOf(sel)) if (setBuilding(state, t.id, key)) n++;
-      if (n) { save(state); flashHint(key ? `${BUILDINGS[key].icon} ${BUILDINGS[key].name} ${n}곳 · ${BUILDINGS[key].desc} (점령당하면 부서짐)` : `철거 ${n}곳`); refresh(); }
+      if (n) { save(state); flashHint(key ? `${BUILDINGS[key].icon} ${BUILDINGS[key].name} ${n}곳 · ${BUILDINGS[key].desc} (지형·지역에 따라 효과 배율, 점령당하면 부서짐)` : `철거 ${n}곳`); refresh(); }
       else flashHint(key ? '골드가 부족하거나 이미 그 건물입니다' : '철거할 건물이 없습니다');
     },
     onCenter: centerOnCapital,

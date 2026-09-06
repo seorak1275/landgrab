@@ -1,5 +1,5 @@
 import { TERRAIN, PLAYER, NEUTRAL } from './world.js';
-import { cap, goldRate, soldierRate, upgradeCost, MAX_LEVEL, regionHolders, heldRegions, regionCount, regionBonus, BUILDINGS, buildCost } from './sim.js';
+import { cap, goldRate, soldierRate, upgradeCost, MAX_LEVEL, regionHolders, heldRegions, regionCount, regionBonus, BUILDINGS, buildCost, buildMul, building, traitOf, bestBuilding } from './sim.js';
 import { PERKS } from './perks.js';
 import { ownerColor } from './render.js';
 import { MAPS } from './mapgen.js';
@@ -50,7 +50,11 @@ function updateBuildRow(state, selected) {
     const all = need.length === 0;
     b.classList.toggle('active', all);
     b.disabled = all || gold < (need.length ? buildCost(state, need[0]) : 0);
-    setText(b.id, `${BUILDINGS[key].icon}${BUILDINGS[key].name}${all ? ' ✓' : ` 💰${formatNum(cost)}`}`);
+    // 배율: 하나 선택이면 그 땅, 여럿이면 평균
+    const m = selected.reduce((s, t) => s + buildMul(state.run, t, key), 0) / selected.length;
+    const mt = Math.abs(m - 1) < 0.05 ? '' : ` ×${m.toFixed(1)}`;
+    b.classList.toggle('good', m >= 1.25); b.classList.toggle('bad', m <= 0.75);
+    setText(b.id, `${BUILDINGS[key].icon}${BUILDINGS[key].name}${mt}${all ? ' ✓' : ` 💰${formatNum(cost)}`}`);
   }
 }
 
@@ -82,10 +86,14 @@ export function updatePanel(state, { selected = [], inspect = null, multi = fals
   }
   const tr = TERRAIN[tile.terrain];
   const regionName = run.regions && tile.region >= 0 ? run.regions[tile.region] + ' · ' : '';
-  const bld = BUILDINGS[tile.build];
-  setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${regionName}${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}${bld ? ` · ${bld.icon}${bld.name}` : ''}`);
+  const bld = building(tile, run), trait = traitOf(run, tile);
+  setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${regionName}${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}${bld.name ? ` · ${bld.icon}${bld.name}${bld.mul !== 1 ? ` ×${bld.mul.toFixed(1)}` : ''}` : ''}`);
   const mine = tile.owner === PLAYER;
-  const lines = [`병사 ${Math.floor(tile.soldiers)} / ${Math.floor(cap(tile, state))}`, `방어 +${Math.round((tr.def + (bld ? bld.def || 0 : 0)) * 100)}%${bld ? ` · ${bld.desc}` : ''}`];
+  const lines = [`병사 ${Math.floor(tile.soldiers)} / ${Math.floor(cap(tile, state))}`, `방어 +${Math.round((tr.def + (bld.def || 0)) * 100)}%${bld.name ? ` · ${bld.name}: 골드 +${Math.round(bld.gold * 100)}% 병사 +${Math.round(bld.soldiers * 100)}% 공격 +${Math.round(bld.attack * 100)}% 방어 +${Math.round(bld.def * 100)}% 한도 +${Math.round(bld.cap * 100)}%${bld.auto ? ` 자동공격 ${bld.auto.toFixed(0)}초` : ''}` : ''}`];
+  if (mine) {
+    const best = bestBuilding(run, tile);
+    lines.push(`${trait ? `${trait.icon} ${trait.name} 지역 (${trait.desc}) · ` : ''}이 땅에 맞는 건물: ${BUILDINGS[best.key].icon}${BUILDINGS[best.key].name} ×${best.m.toFixed(1)}`);
+  }
   if (run.regions && tile.region >= 0) {
     const h = regionHolders(run)[tile.region];
     if (h !== null && h !== undefined && h !== NEUTRAL) lines.push(`★ ${run.regions[tile.region]} 완전 점령 (${ownerName(h)}) · 생산 +${Math.round(regionBonus(state, h) * 100)}%`);

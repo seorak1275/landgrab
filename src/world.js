@@ -2,6 +2,7 @@ import { mulberry32, pick } from './rng.js';
 import { tilesInRadius, corners, distance, key } from './hex.js';
 import { MAPS, buildMap } from './mapgen.js';
 import { PERKS } from './perks.js';
+import { TRAITS } from './traits.js';
 
 export const TERRAIN = {
   plain:    { name: '평지', gold: 1.0, def: 0,   cap: 1.0 },
@@ -29,7 +30,7 @@ function layout(mapKey, radius, factions) {
     return { tiles: tilesInRadius(radius).map(([q, r]) => ({ q, r, region: -1 })), capitals: [cs[0], ...AI_CORNERS.slice(0, factions - 1).map(ci => cs[ci])] };
   }
   const b = buildMap(mapKey, 3 * radius * (radius + 1) + 1, factions);
-  return { ...b, regions: b.map.regions.map(r => r.name), terrainWeights: b.map.regions.map(r => r.terrain ? Object.entries(r.terrain) : null) };
+  return { ...b, regions: b.map.regions.map(r => r.name), traits: b.map.regions.map(r => r.trait || null), terrainWeights: b.map.regions.map(r => r.terrain ? Object.entries(r.terrain) : null) };
 }
 
 export function generateRun(seed, prestige, upgrades = {}, mapKey = 'hex', perk = null) {
@@ -48,15 +49,16 @@ export function generateRun(seed, prestige, upgrades = {}, mapKey = 'hex', perk 
     const weights = (lay.terrainWeights && region >= 0 && lay.terrainWeights[region]) || TERRAIN_WEIGHTS;
     const terrain = owner !== NEUTRAL ? 'citadel' : sea ? 'sea' : pick(rand, weights);
     // 중립 수비는 "가장 가까운 수도"에서 먼 만큼 세진다 — 플레이어 수도 기준으로만 하면 AI 옆 땅이 145명이라 AI가 10분 넘게 못 움직였음
+    const traitGarrison = (lay.traits && region >= 0 && TRAITS[lay.traits[region]] && TRAITS[lay.traits[region]].garrison) || 1; // 산악은 더 세고 평야는 무르다
     const soldiers = owner === NEUTRAL
-      ? Math.round(neutralGarrison(Math.min(...capitals.map(c => distance([q, r], c))), prestige) * garrisonMul)
+      ? Math.round(neutralGarrison(Math.min(...capitals.map(c => distance([q, r], c))), prestige) * garrisonMul * traitGarrison)
       : owner === PLAYER ? (30 + 20 * (upgrades.startArmy || 0)) * (pk.startArmy || 1) : 30;
     return { id, q, r, terrain, owner, level: 1, soldiers, region };
   });
   return {
     seed, radius, factions, tiles,
     map: mapKey in MAPS ? mapKey : 'hex',
-    ...(lay.regions ? { regions: lay.regions, cell: lay.cell } : {}),
+    ...(lay.regions ? { regions: lay.regions, traits: lay.traits, cell: lay.cell } : {}),
     gold: [100 + 100 * (upgrades.startGold || 0) + (pk.startGold || 0), ...Array(factions - 1).fill(100)],
     ...(perk && PERKS[perk] ? { perk } : {}),
     aiTimers: Array(factions).fill(0),

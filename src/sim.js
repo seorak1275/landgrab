@@ -1,6 +1,7 @@
 import { neighbors, key } from './hex.js';
 import { TERRAIN, PLAYER, NEUTRAL } from './world.js';
 import { perkOf } from './perks.js';
+import { TRAITS, TERRAIN_AFFINITY } from './traits.js';
 
 export const MAX_LEVEL = 10;
 // 난이도 = AI 생산 배율(골드·병사) 기본값. 유산 포인트 배수로 보상. (0.6은 "너무 쉽다"는 피드백, 1.0은 탐욕 스크립트도 가끔 전멸, 1.2는 항상 전멸)
@@ -48,7 +49,28 @@ export const BUILDINGS = {
   tower:    { name: '망루', icon: '🏹', desc: `${8}초마다 이길 수 있는 옆 땅을 60%로 자동 공격 · 방어 +20%`, def: 0.2, auto: 8 },
 };
 export const BUILD_COST_BASE = 150;
-export const building = tile => (tile.build && BUILDINGS[tile.build]) || {};
+// 지역 특성: 건물 효율 배율과 중립 수비 배율 ("산청 근처 산악엔 성벽·망루, 호남평야엔 농장" 식으로 자리에 맞는 건물이 세다) — 표는 traits.js
+export { TRAITS, TERRAIN_AFFINITY };
+export function traitOf(run, tile) { return (run && run.traits && tile.region >= 0 && TRAITS[run.traits[tile.region]]) || null; }
+// 이 타일에 key 건물을 지으면 효과가 몇 배인지
+export function buildMul(run, tile, key) {
+  const a = (TERRAIN_AFFINITY[tile.terrain] || {})[key] ?? 1;
+  const tr = traitOf(run, tile);
+  return a * ((tr && tr[key]) ?? 1);
+}
+export function buildingRaw(tile) { return (tile.build && BUILDINGS[tile.build]) || {}; }
+// 지은 건물의 실제 효과 (친화도 반영). auto(망루 주기)는 배율만큼 짧아진다(최소 4초)
+export function building(tile, run) {
+  const b = buildingRaw(tile); if (!b.name) return {};
+  const m = run ? buildMul(run, tile, tile.build) : 1;
+  return { ...b, mul: m, gold: (b.gold || 0) * m, soldiers: (b.soldiers || 0) * m, attack: (b.attack || 0) * m, def: (b.def || 0) * m, cap: (b.cap || 0) * m, auto: b.auto ? Math.max(4, b.auto / m) : 0 };
+}
+// 이 타일에 가장 잘 맞는 건물 (배율 최대, 동률이면 표 순서)
+export function bestBuilding(run, tile) {
+  let best = null;
+  for (const k of Object.keys(BUILDINGS)) { const m = buildMul(run, tile, k); if (!best || m > best.m) best = { key: k, m }; }
+  return best;
+}
 export function buildCost(state, tile) { return BUILD_COST_BASE * TERRAIN[tile.terrain].gold * costMul(state, tile.owner); }
 export function setBuilding(state, tileId, key) {
   const t = state.run.tiles[tileId];
@@ -61,11 +83,11 @@ export function setBuilding(state, tileId, key) {
   return true;
 }
 export function cap(tile, state) {
-  return 20 * tile.level * TERRAIN[tile.terrain].cap * (1 + (building(tile).cap || 0)) * (state && tile.owner === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1);
+  return 20 * tile.level * TERRAIN[tile.terrain].cap * (1 + (building(tile, state && state.run).cap || 0)) * (state && tile.owner === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1);
 }
 // 수비 배율 = 1 + 지형 + 건물, 플레이어는 유산 '성벽술'·축복 곱
 export function defMul(state, tile) {
-  const base = 1 + TERRAIN[tile.terrain].def + (building(tile).def || 0);
+  const base = 1 + TERRAIN[tile.terrain].def + (building(tile, state && state.run).def || 0);
   return tile.owner === PLAYER && state ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) : base;
 }
 // 지역(구·시도) 완전 점령: 한 지역의 타일을 전부 가진 세력은 그 지역 타일의 골드·병사 생산 +50%
@@ -94,8 +116,8 @@ export function regionMul(state, tile, holders = regionHolders(state.run)) {
   return holders && tile.owner !== NEUTRAL && tile.region >= 0 && holders[tile.region] === tile.owner ? 1 + regionBonus(state, tile.owner) : 1;
 }
 export function heldRegions(run, f) { const h = regionHolders(run); return h ? h.filter(o => o === f).length : 0; }
-export function goldRate(state, tile, holders) { return 0.5 * TERRAIN[tile.terrain].gold * tile.level * prodMul(state, tile.owner) * regionMul(state, tile, holders) * (1 + (building(tile).gold || 0)); }
-export function soldierRate(state, tile, holders) { return 0.12 * tile.level * soldierMul(state, tile.owner) * regionMul(state, tile, holders) * (1 + (building(tile).soldiers || 0)); }
+export function goldRate(state, tile, holders) { return 0.5 * TERRAIN[tile.terrain].gold * tile.level * prodMul(state, tile.owner) * regionMul(state, tile, holders) * (1 + (building(tile, state.run).gold || 0)); }
+export function soldierRate(state, tile, holders) { return 0.12 * tile.level * soldierMul(state, tile.owner) * regionMul(state, tile, holders) * (1 + (building(tile, state.run).soldiers || 0)); }
 export function upgradeCost(tile, state) { return 40 * Math.pow(1.7, tile.level - 1) * TERRAIN[tile.terrain].gold * (state ? costMul(state, tile.owner) : 1); }
 export function factionGoldRate(state, f) {
   const holders = regionHolders(state.run);
@@ -137,7 +159,7 @@ export function upgrade(state, tileId) {
 export function runTowers(state, dt) {
   const run = state.run;
   for (const t of run.tiles) {
-    const b = building(t);
+    const b = building(t, run);
     if (!b.auto || t.owner === NEUTRAL) continue;
     t.auto = (t.auto || 0) + dt;
     if (t.auto < b.auto) continue;
@@ -241,7 +263,7 @@ export function resolveBattle(state, t) { while (t.battle) battleTick(state, t, 
 function armies(run) { return run.armies || (run.armies = []); }
 function depart(state, owner, soldiers, path) {
   const from = state.run.tiles[path[0]];
-  const a = { owner, soldiers, am: attackMul(state, owner) * (1 + (building(from).attack || 0)), path, pos: 0, speed: armySpeed(state, owner) };
+  const a = { owner, soldiers, am: attackMul(state, owner) * (1 + (building(from, state.run).attack || 0)), path, pos: 0, speed: armySpeed(state, owner) };
   armies(state.run).push(a);
   return a;
 }
