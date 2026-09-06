@@ -16,7 +16,7 @@ const ownerName = o => (o === NEUTRAL ? '중립' : o === PLAYER ? '나' : `AI ${
 
 function newState(seed = Date.now() >>> 0) {
   const upgrades = {}; for (const k of Object.keys(LEGACY_ITEMS)) upgrades[k] = 0;
-  const legacy = { points: 0, prestigeCount: 0, upgrades, difficulty: DEFAULT_DIFFICULTY, speed: 1 };
+  const legacy = { points: 0, prestigeCount: 0, upgrades, difficulty: 'hell', speed: 1 }; // 사단전은 기본이 최고 난이도 ("AI는 항상 엄청 강하게")
   return { version: VERSION, legacy, run: newRun(seed, legacy), lastSave: 0 };
 }
 function save(s = state) { try { s.lastSave = Date.now(); localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch {} }
@@ -55,7 +55,7 @@ function refresh() {
   if (id === null) {
     const perk = PERKS[state.run.perk];
     setText('p-title', '대한민국 시·군·구 · 지역을 탭하세요');
-    setText('p-stats', `세력 ${state.run.factions - 1}개와 230개 지역 다툼 · 난이도 ${difficultyOf(state).name}${perk ? `\n${perk.icon} 축복: ${perk.name} — ${perk.desc}` : ''}`);
+    setText('p-stats', `AI ${state.run.factions - 1}세력과 230개 지역 다툼 · 난이도 ${difficultyOf(state).name}(AI 생산 ×${difficultyOf(state).mul}, 10분마다 +0.1)${perk ? `\n${perk.icon} 축복: ${perk.name} — ${perk.desc}` : ''}`);
     for (const r of ['row-def', 'row-div', 'row-move', 'row-rebel']) showRow(r, false);
     return;
   }
