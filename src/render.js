@@ -58,6 +58,16 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
       ctx.font = `bold ${Math.round(size * 0.5)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const label = String(Math.floor(t.soldiers));
       ctx.strokeText(label, cx, cy + size * 0.05); ctx.fillText(label, cx, cy + size * 0.05);
+      if (t.battle && size >= 20) {
+        // 전투 중: 공격 세력 색으로 ⚔공격병 수, 테두리는 깜빡임
+        ctx.font = `bold ${Math.round(size * 0.32)}px system-ui, sans-serif`;
+        ctx.fillStyle = ownerColor(t.battle.attacker); ctx.lineWidth = 3;
+        const bl = `⚔${Math.floor(t.battle.attackers)}`;
+        ctx.strokeText(bl, cx, cy - size * 0.42); ctx.fillText(bl, cx, cy - size * 0.42);
+        ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath();
+        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 120); ctx.strokeStyle = ownerColor(t.battle.attacker); ctx.lineWidth = Math.max(2, size * 0.12); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+      }
       if (t.owner !== NEUTRAL && size >= 20) {
         // 레벨은 아래쪽에 작은 글자로 (점 표시는 작아서 안 보였음)
         ctx.font = `bold ${Math.round(size * 0.28)}px system-ui, sans-serif`;
@@ -65,7 +75,7 @@ export function draw(ctx, state, cam, W, H, { selectedIds = [], inspectId = null
         const lv = `Lv${t.level}`;
         ctx.strokeText(lv, cx, cy + size * 0.55); ctx.fillText(lv, cx, cy + size * 0.55);
       }
-      if (mark && mark !== 'move') {
+      if (mark && mark !== 'move' && !t.battle) {
         // 공격 미리보기: 위쪽에 ✓(이김) / ✕(짐)
         ctx.font = `bold ${Math.round(size * 0.4)}px system-ui, sans-serif`;
         ctx.fillStyle = mark === 'win' ? '#6fe38f' : '#ff7b7b';

@@ -15,7 +15,7 @@ function greedy(s) {
   const am = attackMul(s, PLAYER);
   let best = null;
   for (const t of mine) for (const id of neighborIds(s.run, t)) {
-    const n = s.run.tiles[id]; if (n.owner === PLAYER) continue;
+    const n = s.run.tiles[id]; if (n.owner === PLAYER || (n.battle && n.battle.attacker !== PLAYER)) continue;
     const D = n.soldiers * (1 + TERRAIN[n.terrain].def);
     if (t.soldiers * 0.7 * am > D * 1.05 && (!best || D < best.D)) best = { from: t, to: n, D };
   }

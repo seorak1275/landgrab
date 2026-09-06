@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeState, capitalOf } from './helpers.js';
 import { PLAYER, NEUTRAL } from '../src/world.js';
-import { neighborIds } from '../src/sim.js';
+import { neighborIds, runBattles } from '../src/sim.js';
 import { aiPeriod, aiAct, runAi } from '../src/ai.js';
 
 test('주기: 기본 8초, 둔화 2레벨이면 8×1.16', () => {
@@ -26,6 +26,7 @@ test('유리할 때만 공격: 0.8×병사 > 1.4×방어', () => {
   assert.equal(n.owner, NEUTRAL);
   c.soldiers = 18; // 14.4 > 14 → 공격
   aiAct(s, 1);
+  assert.equal(n.battle.attacker, 1); runBattles(s, 100);
   assert.equal(n.owner, 1);
 });
 
@@ -39,6 +40,7 @@ test('우선순위: 중립 > 플레이어, 같은 부류면 약한 쪽', () => {
   d.owner = NEUTRAL; d.soldiers = 3;
   c.soldiers = 100;
   aiAct(s, 1); // 최대 2회: 중립 약한 순 d, b
+  runBattles(s, 100);
   assert.equal(d.owner, 1);
   assert.equal(b.owner, 1);
   assert.equal(a.owner, PLAYER);

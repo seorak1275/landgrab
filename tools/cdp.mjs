@@ -47,6 +47,12 @@ export async function launch(url, { width = 390, height = 844 } = {}) {
       await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       await h.wait(150);
     },
+    async swipe(points, stepMs = 30) {
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: points[0][0], y: points[0][1] }] });
+      for (const [x, y] of points.slice(1)) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] }); await h.wait(stepMs); }
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await h.wait(150);
+    },
     async click(x, y) {
       await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });

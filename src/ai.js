@@ -26,6 +26,7 @@ export function aiAct(state, f) {
     for (const nid of neighborIds(run, t)) {
       const n = run.tiles[nid];
       if (n.owner === f) continue;
+      if (n.battle && n.battle.attacker !== f) continue; // 남의 전투엔 안 끼어든다
       const D = n.soldiers * (1 + TERRAIN[n.terrain].def);
       if (t.soldiers * 0.8 * am > D * 1.4) options.push({ from: t, to: n, D });
     }

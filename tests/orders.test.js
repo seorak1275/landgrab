@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeState, capitalOf } from './helpers.js';
 import { PLAYER, NEUTRAL } from '../src/world.js';
-import { neighborIds, bfsOwn, pathTo, stagingFor, dispatch, previewTargets, predictAttack, setSendListener, send } from '../src/sim.js';
+import { neighborIds, bfsOwn, pathTo, stagingFor, dispatch, previewTargets, predictAttack, setSendListener, send, runBattles } from '../src/sim.js';
 
 // 수도에서 한 방향으로 n칸을 내 땅으로 만든 판을 준비한다
 function corridor(s, n) {
@@ -39,7 +39,8 @@ test('dispatch 공격: 여러 출발지 병사를 집결지에 모아 한 번에
   const target = run.tiles[neighborIds(run, stage).find(id => run.tiles[id].owner === NEUTRAL && !neighborIds(run, b).includes(id))];
   target.terrain = 'plain'; target.soldiers = 100;
   const r = dispatch(s, [a.id, b.id], target.id, 1);
-  assert.equal(r.type, 'capture');
+  assert.equal(r.type, 'attack');
+  runBattles(s, 100);
   assert.equal(target.owner, PLAYER);
   assert.ok(Math.abs(target.soldiers - 60) < 1e-6, `${target.soldiers}`); // 160 - 100
   assert.ok(Math.abs(stage.soldiers - 5) < 1e-6); // 집결지 자체 병사는 안 쓴다

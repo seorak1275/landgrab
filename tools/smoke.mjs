@@ -53,12 +53,19 @@ export async function run(h) {
     return JSON.stringify({ ids, targetId: target.id, p0: pos(run.tiles[ids[0]]), p1: pos(run.tiles[ids[1]]), pt: pos(target) }); })()`));
   const mb2 = JSON.parse(await h.eval(`(() => { const b = document.getElementById('btn-multi').getBoundingClientRect(); return JSON.stringify([b.x + b.width / 2, b.y + b.height / 2]); })()`));
   await h.click(mb2[0], mb2[1]);
-  await h.tap(far.p0[0], far.p0[1]); await h.tap(far.p1[0], far.p1[1]);
+  const p2 = JSON.parse(await h.eval(`(() => { const run = __game.state.run, t = run.tiles[${far.ids[2]}], c = document.getElementById('canvas').getBoundingClientRect(), cam = __game.cam; return JSON.stringify([c.left + (${Math.sqrt(3)} * 36 * (t.q + t.r / 2) - cam.x) * cam.scale + c.width / 2, c.top + (1.5 * 36 * t.r - cam.y) * cam.scale + c.height / 2]); })()`));
+  const lerp = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+  await h.swipe([far.p0, lerp(far.p0, far.p1, 0.5), far.p1, lerp(far.p1, p2, 0.5), p2]);
+  say('drag select', 'sel=' + await h.eval(`JSON.stringify(__game.sel)`) + ' expected ' + JSON.stringify(far.ids.slice(0, 3)) + ' cam=' + await h.eval(`__game.cam.x.toFixed(0) + ',' + __game.cam.y.toFixed(0)`));
+  await h.tap(p2[0], p2[1]); // 탭으로 하나 빼기
+  say('drag select minus tap', 'sel=' + await h.eval(`JSON.stringify(__game.sel)`));
   say('multi panel', await h.eval(`document.getElementById('p-title').textContent + ' | ' + document.getElementById('p-stats').textContent.split(String.fromCharCode(10))[0] + ' | sel=' + JSON.stringify(__game.sel)`));
   await h.shot(`${SP}/s4b_multi_preview.png`);
-  await h.tap(far.pt[0], far.pt[1]); await h.wait(100);
-  say('far attack', await h.eval(`(() => { const run = __game.state.run; return 'target owner=' + run.tiles[${far.targetId}].owner + ' soldiers=' + Math.floor(run.tiles[${far.targetId}].soldiers) + ' cap=' + Math.floor(run.tiles[${far.ids[0]}].soldiers) + ' second=' + Math.floor(run.tiles[${far.ids[1]}].soldiers); })()`));
+  await h.tap(far.pt[0], far.pt[1]); await h.wait(600);
+  say('far attack (battle)', await h.eval(`(() => { const run = __game.state.run, t = run.tiles[${far.targetId}]; return 'owner=' + t.owner + ' attackers=' + Math.floor(t.battle ? t.battle.attackers : -1) + ' defenders=' + Math.floor(t.soldiers) + ' hint=' + document.getElementById('hint').textContent; })()`));
   await h.shot(`${SP}/s4c_far_attack.png`);
+  await h.wait(4500);
+  say('far attack (resolved)', await h.eval(`(() => { const run = __game.state.run, t = run.tiles[${far.targetId}]; return 'owner=' + t.owner + ' soldiers=' + Math.floor(t.soldiers) + ' battle=' + !!t.battle + ' cap=' + Math.floor(run.tiles[${far.ids[0]}].soldiers) + ' second=' + Math.floor(run.tiles[${far.ids[1]}].soldiers); })()`));
   await h.click(mb2[0], mb2[1]); // 다중 모드 끄기
   // 백그라운드 복귀 정산: hidden 상태를 흉내 내고 20분 뒤에 돌아온 것으로
   await h.eval(`(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); })()`);

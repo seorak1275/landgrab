@@ -1,4 +1,4 @@
-import { PLAYER } from './world.js';
+import { PLAYER, TERRAIN } from './world.js';
 import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener } from './sim.js';
 import { runAi } from './ai.js';
 import { simulateOffline } from './offline.js';
@@ -42,8 +42,10 @@ function hms(sec) { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600
 // 파병 연출: 경로를 따라 점이 움직이고, 점령되면 새 주인 색 고리
 function pushLeg(path, color) { effects.push({ fromId: path[0], toId: path[path.length - 1], path, t: 0, color, speed: 1 / (0.25 * Math.max(1, path.length - 1)) }); }
 setSendListener(r => {
-  if (r.owner !== PLAYER) pushLeg([r.fromId, r.toId], ownerColor(r.owner)); // AI 움직임도 보이게
+  if (r.owner !== PLAYER && (r.type === 'move' || r.type === 'attack')) pushLeg([r.fromId, r.toId], ownerColor(r.owner)); // AI 움직임도 보이게
   if (r.type === 'capture') effects.push({ kind: 'ring', fromId: r.fromId, toId: r.toId, t: 0, color: ownerColor(r.owner), speed: 1 / 0.6 });
+  if (r.type === 'repel' && r.owner === PLAYER) flashHint(`공격 실패 · 수비 ${Math.floor(r.defendersLeft)}명 남음`);
+  if (r.type === 'capture' && r.prevOwner === PLAYER) flashHint(`${state.run.tiles[r.toId] ? TERRAIN[state.run.tiles[r.toId].terrain].name : '땅'}을 ${r.owner === PLAYER ? '' : 'AI ' + r.owner + '에게 '}빼앗겼습니다`);
 });
 
 function order(toId) {
@@ -54,9 +56,8 @@ function order(toId) {
     else flashHint(sel.length ? '내 땅으로 이어진 길이 없어요 (빈 곳을 탭하면 선택 해제)' : HINT_DEFAULT);
     refresh(); return;
   }
-  for (const l of r.legs) pushLeg(to.owner === PLAYER || r.type === 'move' ? l.path : [...l.path, toId], FACTION_COLORS[PLAYER]);
-  if (r.type === 'capture' && !multi) sel = [toId];
-  if (r.type === 'repel') flashHint(`공격 실패 · 수비 ${Math.floor(r.defendersLeft)}명 남음`);
+  for (const l of r.legs) pushLeg(r.type === 'move' ? l.path : [...l.path, toId], FACTION_COLORS[PLAYER]);
+  if (r.type === 'attack') flashHint(`⚔ 전투 시작 · ${Math.floor(r.attackers)}명이 싸우는 중 (더 보내면 합류)`);
   refresh(); checkEnd();
 }
 
@@ -166,11 +167,15 @@ async function init() {
     },
     onRatio: r => { state.run.sendRatio = r; setRatioButtons(r); refresh(); },
     onMenu: openMenu,
-    onMulti: () => { multi = !multi; inspectId = null; if (multi) flashHint('내 땅을 여러 개 탭해서 고른 뒤 목적지를 탭하세요'); refresh(); },
+    onMulti: () => { multi = !multi; inspectId = null; if (multi) flashHint('내 땅 위를 쭉 그으면 한 번에 선택 · 지도 이동은 두 손가락', 3000); refresh(); },
     onAll: () => { sel = state.run.tiles.filter(t => t.owner === PLAYER).map(t => t.id); inspectId = null; refresh(); },
     onCenter: centerOnCapital,
   });
-  attachCanvasInput(canvas, cam, { onTap });
+  attachCanvasInput(canvas, cam, { onTap, isSelectMode: () => multi, onDrag: (sx, sy) => {
+    // 드래그 선택: 지나가는 내 땅을 추가 (빼는 건 탭)
+    const t = pickTile(state.run, cam, W, H, sx, sy);
+    if (t && t.owner === PLAYER && !sel.includes(t.id)) { sel = [...sel, t.id]; inspectId = null; refresh(); }
+  } });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { hiddenAt = Date.now(); save(state); return; }
     // 아이폰 홈화면 앱은 다시 열어도 새로 로드되지 않는다 → 백그라운드에 있던 시간도 정산

@@ -53,6 +53,7 @@ export function updatePanel(state, { selected = [], inspect = null, multi = fals
   setHtml('p-title', `<span style="color:${ownerColor(tile.owner)}">■</span> ${tr.name} · ${ownerName(tile.owner)} · Lv.${tile.level}`);
   const mine = tile.owner === PLAYER;
   const lines = [`병사 ${Math.floor(tile.soldiers)} / ${Math.floor(cap(tile))}`, `방어 +${Math.round(tr.def * 100)}%`];
+  if (tile.battle) lines.push(`⚔ 전투 중: ${ownerName(tile.battle.attacker)} 공격 ${Math.floor(tile.battle.attackers)} vs 수비 ${Math.floor(tile.soldiers)} · 병사를 더 보내면 합류`);
   if (mine) lines.push(`생산 골드 ${goldRate(state, tile).toFixed(2)}/초 · 병사 ${soldierRate(state, tile).toFixed(2)}/초`);
   else lines.push(`점령하려면 ${Math.floor(tile.soldiers * (1 + tr.def)) + 1}명 넘게 보내야 함`);
   setText('p-stats', lines.join('\n'));
@@ -99,28 +100,36 @@ export function showModal({ title, html, actions = [], onBodyClick = null }) {
 export function hideModal() { $('modal').hidden = true; }
 export function isModalOpen() { return !$('modal').hidden; }
 
-export function attachCanvasInput(canvas, cam, { onTap, onChange, minScale = 0.4, maxScale = 2.5 }) {
+export function attachCanvasInput(canvas, cam, { onTap, onDrag = null, isSelectMode = () => false, onChange, minScale = 0.4, maxScale = 2.5 }) {
   const pointers = new Map();
-  let start = null, moved = 0, pinchDist = 0;
+  let start = null, moved = 0, pinchDist = 0, prevCenter = null;
   const pos = e => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const center = () => { const [a, b] = [...pointers.values()]; return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; };
   canvas.addEventListener('pointerdown', e => {
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, pos(e));
     if (pointers.size === 1) { start = { p: pos(e), t: performance.now() }; moved = 0; }
-    if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinchDist = Math.hypot(a[0] - b[0], a[1] - b[1]); }
+    if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinchDist = Math.hypot(a[0] - b[0], a[1] - b[1]); prevCenter = center(); }
   });
   canvas.addEventListener('pointermove', e => {
     if (!pointers.has(e.pointerId)) return;
     const prev = pointers.get(e.pointerId), cur = pos(e);
     pointers.set(e.pointerId, cur);
     if (pointers.size === 1) {
-      cam.x -= (cur[0] - prev[0]) / cam.scale; cam.y -= (cur[1] - prev[1]) / cam.scale;
+      const before = moved;
       moved += Math.hypot(cur[0] - prev[0], cur[1] - prev[1]);
+      if (isSelectMode() && onDrag) {
+        // 선택 모드: 한 손가락 드래그는 지나가는 타일을 선택 (8px 넘게 움직인 뒤부터, 시작점도 포함)
+        if (moved >= 8) { if (before < 8) onDrag(start.p[0], start.p[1]); onDrag(cur[0], cur[1]); }
+      } else { cam.x -= (cur[0] - prev[0]) / cam.scale; cam.y -= (cur[1] - prev[1]) / cam.scale; }
     } else if (pointers.size === 2) {
+      // 두 손가락: 벌리면 확대, 함께 움직이면 이동
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
       if (pinchDist > 0) cam.scale = Math.min(maxScale, Math.max(minScale, cam.scale * (d / pinchDist)));
-      pinchDist = d; moved += 100;
+      const c = center();
+      if (prevCenter) { cam.x -= (c[0] - prevCenter[0]) / cam.scale; cam.y -= (c[1] - prevCenter[1]) / cam.scale; }
+      prevCenter = c; pinchDist = d; moved += 100;
     }
     onChange && onChange();
   });
@@ -129,7 +138,7 @@ export function attachCanvasInput(canvas, cam, { onTap, onChange, minScale = 0.4
     pointers.delete(e.pointerId);
     if (pointers.size === 0 && start && moved < 8 && performance.now() - start.t < 400) onTap(start.p[0], start.p[1]);
     if (pointers.size === 0) start = null;
-    pinchDist = 0;
+    pinchDist = 0; prevCenter = null;
   };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
