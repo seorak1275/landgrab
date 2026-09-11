@@ -216,7 +216,7 @@ function openShop(after = hideModal) {
     const label = maxed ? '완료' : locked ? `🔒 환생 ${it.tier}` : `✨ ${cost}`;
     return `<div class="shop-row"><span class="name">${it.name} <b>Lv.${lv}/${it.max}</b><span class="desc">${it.desc}${locked ? ` · 환생 ${it.tier}회부터` : ''}</span></span><button data-action="buy:${k}" ${maxed || locked || state.legacy.points < cost ? 'disabled' : ''}>${label}</button></div>`;
   }).join('');
-  showModal({ title: `유산 상점 · ✨ ${state.legacy.points}`, html: `<p class="sub">이 모드에선 풍요·징집=생산, 성벽술=수비, 시작 골드=시작 인력, 병참=인력 한도, 약탈=점령 시 인력 흡수. 통치·건축은 효과 없음.</p>${rows}`, actions: [{ label: '닫기', onClick: after, primary: true }],
+  showModal({ title: `유산 상점 · ✨ ${state.legacy.points}`, html: `<p class="sub">이 모드에선 풍요·징집=생산, 성벽술=수비, 시작 골드=시작 인력, 병참=인력 한도, 약탈=점령 시 인력 흡수, 통치=시·도 완전 점령 보너스, 건축=기술 값 −3%/레벨.</p>${rows}`, actions: [{ label: '닫기', onClick: after, primary: true }],
     onBodyClick: a => { if (a.startsWith('buy:') && buy(state, a.slice(4))) { save(); openShop(after); } } });
 }
 const relWord = v => (v <= -50 ? '적대' : v <= -15 ? '냉담' : v < 15 ? '보통' : v < 50 ? '우호' : '동맹');

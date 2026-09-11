@@ -137,3 +137,11 @@ test('상위 유산·계급·장군이 사단전에 붙는다', async () => {
   assert.ok(g.attackMul(s, PLAYER) > g.attackMul(base, PLAYER) * 1.25);
   assert.equal(g.speedOf(s, PLAYER), g.speedOf(base, PLAYER));
 });
+
+test("유산 '건축'도 기술 값을 깎는다 (사단전에서 쓸 곳이 없던 항목)", async () => {
+  const g = await import('../src/region/game.js');
+  const base = mk(12);
+  const s = mk(12, { upgrades: { discount: 10 } });
+  assert.ok(g.techCost(s, PLAYER, 'drill') < g.techCost(base, PLAYER, 'drill'));
+  assert.equal(g.techCost(s, 1, 'drill'), g.techCost(base, 1, 'drill'), 'AI에는 안 붙는다');
+});

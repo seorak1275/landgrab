@@ -172,7 +172,8 @@ export const TECH_STEP = 1.6;
 export const techsOf = (run, f) => (run.tech && run.tech[f]) || {};
 export const hasTech = (run, f, key) => !!techsOf(run, f)[key];
 export const techCount = (run, f) => Object.keys(techsOf(run, f)).length;
-export function techCost(state, f, key) { return TECHS[key] ? Math.round(TECHS[key].cost * Math.pow(TECH_STEP, techCount(state.run, f)) * (f === PLAYER ? Math.max(0.5, 1 - 0.06 * lv(state, 'research')) : 1)) : Infinity; }
+// 유산 '연구소'(−6%/Lv)와 '건축'(−3%/Lv)이 기술 값을 깎는다 — 건축은 사단전에 쓸 곳이 없었다
+export function techCost(state, f, key) { return TECHS[key] ? Math.round(TECHS[key].cost * Math.pow(TECH_STEP, techCount(state.run, f)) * (f === PLAYER ? Math.max(0.4, 1 - 0.06 * lv(state, 'research') - 0.03 * lv(state, 'discount')) : 1)) : Infinity; }
 export function research(state, f, key) {
   const run = state.run;
   if (!TECHS[key] || hasTech(run, f, key)) return false;
