@@ -4,6 +4,7 @@ import MAP from '../maps/sgg.js';
 import { mulberry32 } from '../rng.js';
 import { PERKS, perkOf } from '../perks.js';
 import { DIFFICULTIES, DEFAULT_DIFFICULTY } from '../sim.js';
+import { rankBonus, generalMul } from '../career.js';
 
 export { MAP };
 export const PLAYER = 0, NEUTRAL = -1, OFF = -2; // OFF = 이 판(권역)에 없는 지역
@@ -44,7 +45,7 @@ export const TECH_STEP = 1.6;
 export const techsOf = (run, f) => (run.tech && run.tech[f]) || {};
 export const hasTech = (run, f, key) => !!techsOf(run, f)[key];
 export const techCount = (run, f) => Object.keys(techsOf(run, f)).length;
-export function techCost(state, f, key) { return TECHS[key] ? Math.round(TECHS[key].cost * Math.pow(TECH_STEP, techCount(state.run, f))) : Infinity; }
+export function techCost(state, f, key) { return TECHS[key] ? Math.round(TECHS[key].cost * Math.pow(TECH_STEP, techCount(state.run, f)) * (f === PLAYER ? Math.max(0.5, 1 - 0.06 * lv(state, 'research')) : 1)) : Infinity; }
 export function research(state, f, key) {
   const run = state.run;
   if (!TECHS[key] || hasTech(run, f, key)) return false;
@@ -94,7 +95,8 @@ export function proposePact(state, from, to, force = false) {
     return false;
   }
   if (!state.run.pacts) state.run.pacts = {};
-  state.run.pacts[pairKey(from, to)] = (state.run.elapsed || 0) + PACT_DUR;
+  const dur = PACT_DUR + (from === PLAYER || to === PLAYER ? 20 * lv(state, 'envoy') : 0); // 유산 '사절'
+  state.run.pacts[pairKey(from, to)] = (state.run.elapsed || 0) + dur;
   addRel(state, from, to, 10);
   emit({ type: 'pact', a: from, b: to });
   return true;
@@ -103,6 +105,7 @@ export function breakPact(state, betrayer, victim) {
   const p = state.run.pacts || {};
   if (!atPeace(state, betrayer, victim)) return false;
   delete p[pairKey(betrayer, victim)];
+  state.run.betrayals = state.run.betrayals || {}; state.run.betrayals[betrayer] = (state.run.betrayals[betrayer] || 0) + 1;
   addRel(state, betrayer, victim, -BETRAY_PENALTY);
   for (let f = 0; f < state.run.factions; f++) if (f !== betrayer && f !== victim) addRel(state, betrayer, f, -BETRAY_WITNESS); // 남 보기에도 믿을 수 없는 자
   emit({ type: 'betray', owner: betrayer, victim });
@@ -116,14 +119,18 @@ export const TRUCE = 120; // 시작 뒤 이 시간(초) 동안 AI는 플레이�
 export const truce = state => (state.run.elapsed || 0) < TRUCE;
 
 const lv = (state, k) => (state.legacy && state.legacy.upgrades && state.legacy.upgrades[k]) || 0;
+// 장군 효과 (유산 '통솔'로 커진다) · 고립 완화(유산 '보급술')는 플레이어에게만
+const gen = (state, field) => 1 + (generalMul(state.legacy || {}, field) - 1) * (1 + 0.4 * lv(state, 'command'));
+export const isoProd = (state, f) => (f === PLAYER ? Math.min(1, ISO_PROD + 0.1 * lv(state, 'supply')) : ISO_PROD);
+export const isoDef = (state, f) => (f === PLAYER ? Math.min(1, ISO_DEF + 0.1 * lv(state, 'supply')) : ISO_DEF);
 export function difficultyOf(state) { return DIFFICULTIES[state.legacy.difficulty] || DIFFICULTIES[DEFAULT_DIFFICULTY]; }
 export function aiMul(state) { return difficultyOf(state).mul + 0.1 * state.legacy.prestigeCount + Math.min(AI_RAMP_MAX, AI_RAMP * (state.run.elapsed || 0) / 600); }
-export function prodMul(state, f) { const base = f === PLAYER ? (1 + 0.1 * lv(state, 'gold') + 0.1 * lv(state, 'soldiers')) * (perkOf(state).gold || 1) * (perkOf(state).soldiers || 1) : aiMul(state); return base * techMul(state.run, f, 'prod'); }
-export function attackMul(state, f) { return (f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) : 1) * techMul(state.run, f, 'attack'); }
-export function defMul(state, r) { const base = (TRAIT_DEF[MAP.regions[r.id].tr] || 1) * (r.iso ? ISO_DEF : 1); return r.owner === PLAYER ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) : base; }
+export function prodMul(state, f) { const base = f === PLAYER ? (1 + 0.1 * lv(state, 'gold') + 0.1 * lv(state, 'soldiers')) * (perkOf(state).gold || 1) * (perkOf(state).soldiers || 1) * rankBonus(state.legacy) * gen(state, 'prod') : aiMul(state); return base * techMul(state.run, f, 'prod'); }
+export function attackMul(state, f) { return (f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) * gen(state, 'attack') : 1) * techMul(state.run, f, 'attack'); }
+export function defMul(state, r) { const base = (TRAIT_DEF[MAP.regions[r.id].tr] || 1) * (r.iso ? isoDef(state, r.owner) : 1); return r.owner === PLAYER ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) * gen(state, 'def') : base; }
 export function poolCap(state, f) { return POOL_CAP * (f === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1); }
-export function speedOf(state, f) { return (f === PLAYER ? REGION_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) : REGION_SPEED) * techMul(state.run, f, 'speed'); }
-export function prodOf(state, r) { return MAP.regions[r.id].prod * prodMul(state, r.owner) * (r.iso ? ISO_PROD : 1); }
+export function speedOf(state, f) { return (f === PLAYER ? REGION_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) * gen(state, 'speed') : REGION_SPEED) * techMul(state.run, f, 'speed'); }
+export function prodOf(state, r) { return MAP.regions[r.id].prod * prodMul(state, r.owner) * (r.iso ? isoProd(state, r.owner) : 1); }
 export function aiCountFor(prestige) { return Math.min(4 + Math.floor(prestige / 3), 6); }
 export const info = id => MAP.regions[id];
 export const neighbors = id => MAP.regions[id].adj;
@@ -256,11 +263,15 @@ function battleTick(state, r, dt) {
     state.run.rebels = state.run.rebels.filter(x => !x.dead);
     updateMax(state);
     emit({ type: 'capture', id: r.id, owner: w.owner, prevOwner: prev, remaining: w.size });
+    if (prev !== NEUTRAL && !owned(state, prev).length) { // 마지막 지역을 빼앗아 세력을 지웠다
+      state.run.kills = state.run.kills || {}; state.run.kills[w.owner] = (state.run.kills[w.owner] || 0) + 1;
+      emit({ type: 'eliminate', owner: prev, by: w.owner });
+    }
   } else if (!alive) { r.def = 0; r.div = 0; } // 다 같이 죽음 (수비가 이겼으면 비례 배분된 값 그대로)
 }
 export function runBattles(state, dt) { for (const r of state.run.regions) if (r.battle) battleTick(state, r, dt); }
 export function resolveBattle(state, r) { while (r.battle) battleTick(state, r, 1e9); }
-function updateMax(state) { const n = owned(state, PLAYER).length; if (n > state.run.maxRegions) state.run.maxRegions = n; }
+function updateMax(state) { const n = owned(state, PLAYER).length; if (n > state.run.maxRegions) state.run.maxRegions = n; if (state.run.lowRegions === undefined || n < state.run.lowRegions) state.run.lowRegions = n; }
 
 // ---- 행군 ----
 function depart(state, owner, size, path) { const a = { owner, size, am: attackMul(state, owner), path, pos: 0, speed: speedOf(state, owner) }; state.run.armies.push(a); return a; }

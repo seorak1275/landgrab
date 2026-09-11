@@ -2,7 +2,9 @@ import { PLAYER, TERRAIN } from './world.js';
 import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener, setBuilding, BUILDINGS, TRAITS } from './sim.js';
 import { PERKS, offerPerks } from './perks.js';
 import { runAi } from './ai.js';
-import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn } from './prestige.js';
+import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn, itemLocked } from './prestige.js';
+import { GENERAL_SPECS, GENERALS, drawGeneral, setLead, rankOf, addRecord, checkMedals, recommendDifficulty } from './career.js';
+import { openCareer as openCareerModal, generalPickerHtml, pickedGeneral } from './career_ui.js';
 import { newState, save, load, serialize, deserialize, SAVE_KEY, FEATURES } from './save.js';
 import { createCamera, draw, pickTile, loadAssets, worldBounds, FACTION_COLORS, ownerColor, setColorblind } from './render.js';
 import { MAPS, DEFAULT_MAP } from './mapgen.js';
@@ -91,6 +93,7 @@ function openHelp(section = null) {
     <h3>지역</h3><p>대한민국(시·도)·서울(구) 지도에서 한 지역의 땅을 전부 가지면 그 지역 생산 +50%(2칸 이상인 지역만). 이름표가 ★와 주인 색으로 바뀐다. 섬은 뱃길로 이어진다.</p>
     <h3>AI·난이도</h3><p>AI는 8초마다 업그레이드·공격·보강하고 4주기마다 땅 전체에서 병사를 모아 집결 공격한다. 난이도(쉬움 0.6 / 보통 0.8 / 어려움 1.0 / 지옥 1.2)는 AI 생산 배율, 유산 포인트도 ×1~2. 환생마다 +0.1, 판이 10분 지날 때마다 +0.1(최대 +1.0)씩 세진다.</p>
     <h3>환생·유산·축복</h3><p>지도를 다 먹거나(정복) 다 잃으면(전멸, 강제) 환생. 유산 포인트로 상점의 영구 보너스 15종을 사고, 환생 때 축복 3개 중 하나를 골라 그 판에 쓴다. 지도·난이도도 그때 고른다. <b>방치는 없다</b> — 창을 닫으면 시간이 멈추고 돌아오면 나가던 그 상황 그대로다.</p>
+    <h3>계급·장군·전적</h3><p>판이 끝나면 전적과 훈장이 남고, 환생·정복으로 공적이 쌓여 계급이 오른다(계급마다 생산 +). 환생할 때마다 장군을 하나 얻어 그 판에 앞장세운다. ≡ 메뉴의 🎖전적·계급.</p>
     <h3>기타</h3><p>▶×1 버튼으로 배속(×1/×2/×4). 메뉴에 색약 모드, 저장 내보내기/가져오기.</p>`;
   showModal({ title: '📖 도움말', html: `<div class="help">${section === 'build' ? build + rest : rest + build}</div>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
 }
@@ -118,8 +121,9 @@ function showWelcome(then) {
 function mapPickerHtml(current) {
   const maps = Object.values(MAPS).map(m => `<label class="map-row"><input type="radio" name="map" value="${m.key}" ${m.key === current ? 'checked' : ''}> <b>${m.name}</b><span class="desc">${m.desc}${m.homeName ? ` · 내 수도 ${m.homeName}` : ''}</span></label>`).join('');
   const cur = state.legacy.difficulty || DEFAULT_DIFFICULTY;
-  const diffs = Object.entries(DIFFICULTIES).map(([k, d]) => `<label class="diff-row"><input type="radio" name="diff" value="${k}" ${k === cur ? 'checked' : ''}> ${d.name} <span class="desc">AI 생산 ×${d.mul} · 유산 ×${d.points}</span></label>`).join('');
-  return `${maps}<p class="sub">난이도 (AI는 10분마다 +0.1씩 더 세집니다)</p>${diffs}`;
+  const rec = recommendDifficulty(state.legacy, 'hex');
+  const diffs = Object.entries(DIFFICULTIES).map(([k, d]) => `<label class="diff-row"><input type="radio" name="diff" value="${k}" ${k === cur ? 'checked' : ''}> ${d.name}${k === rec ? ' ★ 추천' : ''} <span class="desc">AI 생산 ×${d.mul} · 유산 ×${d.points}</span></label>`).join('');
+  return `${maps}<p class="sub">난이도 (AI는 10분마다 +0.1씩 더 세집니다${rec !== cur ? ' · ★는 지난 판 성적으로 뽑은 추천' : ''})</p>${diffs}`;
 }
 function pickedMap() { const el = document.querySelector('input[name="map"]:checked'); return el ? el.value : state.run.map; }
 function pickedDifficulty() { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : (state.legacy.difficulty || DEFAULT_DIFFICULTY); }
@@ -168,12 +172,13 @@ function openMenu() {
     html: `<p>유산 포인트 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회</p>
       <p>지도: ${(MAPS[state.run.map] || MAPS.hex).name} · 난이도 ${difficultyOf(state).name} <button data-action="map">지도·난이도 바꾸기</button></p>
       <p><a href="region.html" style="color:#6fb1ff;font-weight:bold">🗺 새 모드: 대한민국 시·군·구 사단전 →</a></p>
-      <p><button data-action="help">📖 도움말</button> <button data-action="shop">유산 상점</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
+      <p><button data-action="help">📖 도움말</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
       <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드 (구분 잘 되는 색 + 타일에 주인 글자)</label></p>
       <p><button data-action="reset" style="color:#eb5757">처음부터(전부 삭제)</button></p>`,
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
     onBodyClick: (a, el) => {
       if (a === 'shop') openShop();
+      if (a === 'career') openCareerModal({ state, save, after: openMenu, mode: 'hex' });
       if (a === 'map') openMapChange();
       if (a === 'help') openHelp();
       if (a === 'cb') { state.legacy.colorblind = el.checked; setColorblind(el.checked); save(state); refresh(); }
@@ -196,9 +201,9 @@ function openMenu() {
 
 function openShop(afterClose = hideModal) {
   const rows = Object.entries(LEGACY_ITEMS).map(([k, it]) => {
-    const lv = state.legacy.upgrades[k] || 0, maxed = lv >= it.max, cost = maxed ? null : itemCost(k, lv);
-    return `<div class="shop-row"><span class="name">${it.name} <b>Lv.${lv}/${it.max}</b><span class="desc">${it.desc}</span></span>
-      <button data-action="buy:${k}" ${maxed || state.legacy.points < cost ? 'disabled' : ''}>${maxed ? '완료' : `✨ ${cost}`}</button></div>`;
+    const lv = state.legacy.upgrades[k] || 0, maxed = lv >= it.max, locked = itemLocked(it, state.legacy), cost = maxed ? null : itemCost(k, lv);
+    return `<div class="shop-row"><span class="name">${it.name} <b>Lv.${lv}/${it.max}</b><span class="desc">${it.desc}${locked ? ` · 환생 ${it.tier}회부터` : ''}</span></span>
+      <button data-action="buy:${k}" ${maxed || locked || state.legacy.points < cost ? 'disabled' : ''}>${maxed ? '완료' : locked ? `🔒 환생 ${it.tier}` : `✨ ${cost}`}</button></div>`;
   }).join('');
   showModal({ title: `유산 상점 · ✨ ${state.legacy.points}`, html: rows, actions: [{ label: '닫기', onClick: afterClose, primary: true }],
     onBodyClick: a => { if (a.startsWith('buy:') && buy(state, a.slice(4))) { save(state); openShop(afterClose); } } });
@@ -211,10 +216,21 @@ function checkEnd() {
   ended = true;
   const pts = pointsFor(state, st);
   const seed = Date.now() >>> 0;
+  // 판 결과를 전적에 남기고(훈장 판정), 환생 보상으로 장군을 한 명 뽑는다
+  const tiles = state.run.tiles.length, mine = state.run.tiles.filter(t => t.owner === PLAYER).length;
+  const rec = {
+    mode: 'hex', board: state.run.map, difficulty: state.legacy.difficulty, outcome: st,
+    regions: st === 'conquered' ? tiles : Math.max(mine, state.run.maxTilesOwned || 0), total: tiles,
+    elapsed: Math.round(state.run.elapsed || 0), points: pts, betrayals: 0, killed: 0,
+  };
+  addRecord(state.legacy, rec);
+  const medals = checkMedals(state.legacy, rec);
+  const gen = drawGeneral(state.legacy, seed), gi = GENERALS.find(g => g.key === gen.key);
+  const medalHtml = medals.length ? `<p>🎖 훈장 획득: ${medals.map(m => `<b>${m.icon} ${m.name}</b>`).join(' · ')}</p>` : '';
   showModal({
     title: st === 'conquered' ? '🎉 지도 정복!' : '💀 전멸…',
-    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b></p><p>환생하면 지도가 초기화되고 유산 상점에서 영구 보너스를 살 수 있습니다.</p>${perkPickerHtml(seed)}<p class="sub">다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
-    actions: [{ label: '환생', primary: true, onClick: () => { const mk = pickedMap(), dk = pickedDifficulty(), pk = pickedPerk(); state.legacy.difficulty = dk; rebirth(state, st, seed, mk, pk); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
+    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b> · 최대 ${rec.regions}/${rec.total}칸 · ${hms(rec.elapsed)}</p>${medalHtml}<p>🎖 계급 ${rankOf(state.legacy).name} · 새 장군 <b>${GENERAL_SPECS[gi.spec].icon} ${gi.name} Lv.${gen.level}</b> ${gen.isNew ? '(새로 합류)' : '(경험이 늘었다)'}</p>${generalPickerHtml(state)}${perkPickerHtml(seed)}<p class="sub">다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
+    actions: [{ label: '환생', primary: true, onClick: () => { const mk = pickedMap(), dk = pickedDifficulty(), pk = pickedPerk(); const g = pickedGeneral(); if (g) setLead(state.legacy, g); state.legacy.difficulty = dk; rebirth(state, st, seed, mk, pk); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
   });
 }
 

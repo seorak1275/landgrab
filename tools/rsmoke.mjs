@@ -42,6 +42,8 @@ export async function run(h) {
   // 정복 → 환생
   await h.eval(`__game.state.run.regions.forEach(r => { r.owner = 0; r.battle = undefined; }); __game.state.run.rebels = []; __game.state.run.armies = []`); await h.wait(600);
   say('conquest', await h.eval(`document.getElementById('modal-title').textContent + ' perks=' + document.querySelectorAll('input[name=perk]').length + ' diffs=' + document.querySelectorAll('input[name=diff]').length + ' boards=' + document.querySelectorAll('input[name=board]').length`));
+  say('rebirth modal extras', await h.eval(`(() => { const b = document.getElementById('modal-body').innerText.replace(/\s+/g, ' '); return 'generals=' + document.querySelectorAll('input[name=general]').length + ' | ' + b.slice(0, 160); })()`));
+  await h.shot(`${SP}/r7_rebirth.png`);
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(500);
   say('after rebirth', await h.eval(`document.getElementById('modal-title').textContent + ' prestige=' + __game.state.legacy.prestigeCount + ' points=' + __game.state.legacy.points + ' factions=' + __game.state.run.factions + ' mine=' + __game.state.run.regions.filter(r => r.owner === 0).length`));
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
@@ -71,6 +73,13 @@ export async function run(h) {
   await h.eval(`document.querySelector('[data-action^="pact:"]').click()`); await h.wait(300);
   say('after pact', await h.eval(`document.getElementById('hint').textContent + ' | btn=' + document.getElementById('btn-diplo').textContent`));
   await h.shot(`${SP}/r6_diplo.png`);
+  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
+  // 전적·계급 화면
+  await h.eval(`document.getElementById('btn-menu').click()`); await h.wait(200);
+  await h.eval(`document.querySelector('[data-action="career"]').click()`); await h.wait(200);
+  say('career modal', await h.eval(`document.getElementById('modal-title').textContent + ' | ' + document.getElementById('modal-body').innerText.replace(/\s+/g, ' ').slice(0, 180)`));
+  await h.shot(`${SP}/r8_career.png`);
+  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
   say('console errors', JSON.stringify(h.errors()));
 }

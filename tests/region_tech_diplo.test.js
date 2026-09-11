@@ -111,3 +111,29 @@ test('정전 중에는 예전 규칙대로 중립·다른 세력은 계속 친�
   for (let t = 0; t < 200; t++) { tick(s, 1); runAi(s, 1); }
   assert.ok(owned(s, NEUTRAL).length < before, 'AI는 중립을 계속 먹는다');
 });
+
+test('상위 유산·계급·장군이 사단전에 붙는다', async () => {
+  const g = await import('../src/region/game.js');
+  const c = await import('../src/career.js');
+  const base = mk(8);
+  const s = mk(8, { upgrades: { research: 5, envoy: 2, supply: 3, command: 5 }, prestigeCount: 10 });
+  // 연구소: 기술 비용 −6%/레벨 (플레이어만)
+  assert.ok(g.techCost(s, PLAYER, 'drill') < g.techCost(base, PLAYER, 'drill'));
+  assert.equal(g.techCost(s, 1, 'drill'), g.techCost(base, 1, 'drill'));
+  // 보급술: 고립 감소 완화 (플레이어만)
+  assert.ok(g.isoProd(s, PLAYER) > g.isoProd(base, PLAYER));
+  assert.equal(g.isoProd(s, 1), g.isoProd(base, 1));
+  // 사절: 내 정전이 길어진다
+  s.run.rel[PLAYER][1] = 60; g.proposePact(s, PLAYER, 1);
+  assert.ok(g.pactLeft(s, PLAYER, 1) > g.PACT_DUR);
+  // 계급: 공적이 쌓이면 생산이 는다
+  const before = g.prodMul(s, PLAYER), aiBefore = g.prodMul(s, 1);
+  s.legacy.conquests = 20; // 계급 상승
+  assert.ok(g.prodMul(s, PLAYER) > before);
+  assert.equal(g.prodMul(s, 1), aiBefore, 'AI 생산은 계급과 무관');
+  // 장군: 고른 장군의 특기만, 통솔 유산이 있으면 더 크게
+  const att = c.GENERALS.find(x => x.spec === 'attack');
+  s.legacy.generals = { [att.key]: 5 }; c.setLead(s.legacy, att.key);
+  assert.ok(g.attackMul(s, PLAYER) > g.attackMul(base, PLAYER) * 1.25);
+  assert.equal(g.speedOf(s, PLAYER), g.speedOf(base, PLAYER));
+});

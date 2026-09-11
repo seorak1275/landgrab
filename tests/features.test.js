@@ -116,7 +116,7 @@ test('유산: 성벽술·병참·건축·행군·통치·개척·시작 골드·
   // 유산 축복: 포인트 ×1.3
   s.legacy.difficulty = 'easy'; for (const t of s.run.tiles) { t.owner = PLAYER; t.level = 1; }
   assert.equal(pointsFor(s, 'conquered'), Math.floor((10 + 9 + 3) * 1.3));
-  assert.equal(Object.keys(LEGACY_ITEMS).length, 14); // '오프라인 한도'를 뺐다(방치 제거)
+  assert.equal(Object.keys(LEGACY_ITEMS).length, 18); // 15 − '오프라인 한도'(방치 제거) + 상위 4종
   for (const [k, it] of Object.entries(LEGACY_ITEMS)) assert.ok(it.max > 0 && itemCost(k, 0) === it.base);
 });
 

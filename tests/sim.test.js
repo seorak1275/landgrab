@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { rankBonus } from '../src/career.js';
 import { makeState, capitalOf, settle } from './helpers.js';
 import { PLAYER, NEUTRAL } from '../src/world.js';
 import { runBattles, runArmies, battleRate, battleParty, battleAttackers, ARMY_SPEED, predictAttack, neighborIds, cap, goldRate, soldierRate, upgradeCost, tick, upgrade, send, status, tilesOwned, MAX_LEVEL, setSendListener } from '../src/sim.js';
@@ -26,9 +27,10 @@ test('생산·한도·비용 수식', () => {
 test('유산·환생 배율', () => {
   const s = makeState(1, 2, { gold: 3, soldiers: 1, attack: 4 });
   const pc = capitalOf(s, PLAYER), ac = capitalOf(s, 1);
-  near(goldRate(s, pc), 1.5 * 1.3);
+  const rank = rankBonus(s.legacy); // 계급(환생 2회 = 일병)도 생산에 붙는다
+  near(goldRate(s, pc), 1.5 * 1.3 * rank);
   near(goldRate(s, ac), 1.5 * 1.0); // AI 보통 0.8 + 환생 2회 0.2
-  near(soldierRate(s, pc), 0.12 * 1.1);
+  near(soldierRate(s, pc), 0.12 * 1.1 * rank);
   near(soldierRate(s, ac), 0.12 * 1.0);
   s.legacy.difficulty = 'hell'; near(goldRate(s, ac), 1.5 * 1.4);
   s.run.elapsed = 1200; near(goldRate(s, ac), 1.5 * 1.6); // 20분 램프 +0.2

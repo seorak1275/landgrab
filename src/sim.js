@@ -1,4 +1,5 @@
 import { neighbors, key } from './hex.js';
+import { rankBonus, generalMul } from './career.js';
 import { TERRAIN, PLAYER, NEUTRAL } from './world.js';
 import { perkOf } from './perks.js';
 import { TRAITS, TERRAIN_AFFINITY } from './traits.js';
@@ -33,12 +34,18 @@ export function aiMul(state) {
 }
 export const lv = (state, k) => (state.legacy && state.legacy.upgrades && state.legacy.upgrades[k]) || 0; // 유산 레벨
 export function prodMul(state, f) {
-  return f === PLAYER ? (1 + 0.1 * lv(state, 'gold')) * (perkOf(state).gold || 1) : aiMul(state);
+  return f === PLAYER ? (1 + 0.1 * lv(state, 'gold')) * (perkOf(state).gold || 1) * career(state, 'prod') : aiMul(state);
 }
 export function soldierMul(state, f) {
-  return f === PLAYER ? (1 + 0.1 * lv(state, 'soldiers')) * (perkOf(state).soldiers || 1) : aiMul(state);
+  return f === PLAYER ? (1 + 0.1 * lv(state, 'soldiers')) * (perkOf(state).soldiers || 1) * career(state, 'prod') : aiMul(state);
 }
-export function attackMul(state, f) { return f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) : 1; }
+// 계급(생산)·장군(특기) — 두 모드가 같이 쓰는 영구 성장. prod엔 계급 보너스도 곱한다
+function career(state, field) {
+  const L = (state && state.legacy) || {};
+  const g = 1 + (generalMul(L, field) - 1) * (1 + 0.4 * lv(state, 'command'));
+  return field === 'prod' ? g * rankBonus(L) : g;
+}
+export function attackMul(state, f) { return f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) * career(state, 'attack') : 1; }
 export function costMul(state, f) { return f === PLAYER ? 1 - 0.03 * lv(state, 'discount') : 1; }
 
 // ---- 타일 특화 건물 (플레이어만, 타일당 하나, 골드로 짓고 바꾸면 다시 냄, 철거는 무료) ----
@@ -89,7 +96,7 @@ export function cap(tile, state) {
 // 수비 배율 = 1 + 지형 + 건물, 플레이어는 유산 '성벽술'·축복 곱
 export function defMul(state, tile) {
   const base = 1 + TERRAIN[tile.terrain].def + (building(tile, state && state.run).def || 0);
-  return tile.owner === PLAYER && state ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) : base;
+  return tile.owner === PLAYER && state ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) * career(state, 'def') : base;
 }
 // 지역(구·시도) 완전 점령: 한 지역의 타일을 전부 가진 세력은 그 지역 타일의 골드·병사 생산 +50%
 // 타일이 1개뿐인 지역은 제외 (37타일 대한민국에서 대전·광주 같은 1칸 지역을 먹자마자 +50%가 붙어 AI끼리 30분 독식이 났음)
@@ -190,7 +197,7 @@ const emit = r => { if (sendListener) sendListener(r); };
 // 모든 편이 같은 속도(rate, 전력/초)로 깎인다 → 가장 센 편이 남고, 남는 전력 = 1등 − 2등. 세 편 이상이면 난전.
 // rate = 3 + 0.5·√(전투 시작 시 전력 합계): 작은 싸움은 2~3초, 수백 명 싸움은 20초 안팎. 합류하면 rate는 커질 수만 있다(시간이 초기화되지 않음).
 export const ARMY_SPEED = 2; // 행군 속도, 타일/초
-export function armySpeed(state, f) { return f === PLAYER ? ARMY_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) : ARMY_SPEED; }
+export function armySpeed(state, f) { return f === PLAYER ? ARMY_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) * career(state, 'speed') : ARMY_SPEED; }
 export function battleRate(total) { return 3 + 0.5 * Math.sqrt(total); }
 export function battleParty(tile, owner) { return tile.battle ? tile.battle.parties.find(p => p.owner === owner) : undefined; }
 export function battleAttackers(tile) { return tile.battle ? tile.battle.parties.reduce((s, p) => s + p.soldiers, 0) : 0; }

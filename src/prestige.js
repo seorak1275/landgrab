@@ -16,6 +16,11 @@ export const LEGACY_ITEMS = {
   regionBonus: { name: '통치',         desc: '지역 완전 점령 보너스 +10%p/레벨',  max: 5,  base: 10 },
   aiSlow:      { name: 'AI 둔화',      desc: 'AI 행동 주기 +8%/레벨',             max: 5,  base: 12 },
   pointsMul:   { name: '유산 축복',    desc: '환생 유산 포인트 +10%/레벨',        max: 10, base: 15 },
+  // 상위 단계: 환생을 몇 번 해야 열린다 (tier = 필요한 환생 횟수). 사단전 전용 효과는 그 모드에서만 쓴다
+  supply:      { name: '보급술',       desc: '고립 지역 생산 −폭 완화 +10%p/레벨 (사단전)', max: 5, base: 8,  tier: 2 },
+  research:    { name: '연구소',       desc: '기술 연구 비용 −6%/레벨 (사단전)',            max: 5, base: 8,  tier: 2 },
+  envoy:       { name: '사절',         desc: '정전 시간 +20초/레벨 (사단전)',               max: 5, base: 8,  tier: 3 },
+  command:     { name: '통솔',         desc: '장군 효과 +2%p/레벨',                         max: 5, base: 12, tier: 4 },
 };
 // 없앤 유산 (2026-09-11 방치 제거로 '오프라인 한도'가 의미를 잃었다): 저장을 이관할 때 쓴 포인트를 돌려준다
 export const REMOVED_ITEMS = {
@@ -33,8 +38,10 @@ export function refundRemoved(legacy) {
   if (back) legacy.points = (legacy.points || 0) + back;
   return back;
 }
+export const itemLocked = (item, legacy) => (item.tier || 0) > (legacy.prestigeCount || 0);
 export function buy(state, key) {
   const item = LEGACY_ITEMS[key]; if (!item) return false;
+  if (itemLocked(item, state.legacy)) return false; // 환생 횟수가 모자라면 아직 못 산다
   const u = state.legacy.upgrades; const lv = u[key] || 0;
   if (lv >= item.max) return false;
   const c = itemCost(key, lv);

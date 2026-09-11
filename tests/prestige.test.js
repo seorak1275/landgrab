@@ -16,6 +16,11 @@ test('상점 비용 = 기본×1.5^레벨, 최대 레벨·포인트 부족이면 
   s.legacy.upgrades.aiSlow = LEGACY_ITEMS.aiSlow.max; s.legacy.points = 1e6;
   assert.equal(buy(s, 'aiSlow'), false);
   assert.equal(buy(s, 'offline'), false); // 없앤 유산은 살 수 없다
+  // 상위 단계는 환생을 해야 열린다
+  assert.ok(LEGACY_ITEMS.command.tier > 0);
+  assert.equal(buy(s, 'command'), false);
+  s.legacy.prestigeCount = LEGACY_ITEMS.command.tier;
+  assert.equal(buy(s, 'command'), true);
 });
 
 test('포인트: 정복 = 10 + 타일/4 + 레벨합/10, 전멸 = 최대보유/4(최소 1), 난이도 배수', () => {
