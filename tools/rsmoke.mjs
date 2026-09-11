@@ -41,7 +41,7 @@ export async function run(h) {
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(100); await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(100);
   // 정복 → 환생
   await h.eval(`__game.state.run.regions.forEach(r => { r.owner = 0; r.battle = undefined; }); __game.state.run.rebels = []; __game.state.run.armies = []`); await h.wait(600);
-  say('conquest', await h.eval(`document.getElementById('modal-title').textContent + ' perks=' + document.querySelectorAll('input[name=perk]').length + ' diffs=' + document.querySelectorAll('input[name=diff]').length`));
+  say('conquest', await h.eval(`document.getElementById('modal-title').textContent + ' perks=' + document.querySelectorAll('input[name=perk]').length + ' diffs=' + document.querySelectorAll('input[name=diff]').length + ' boards=' + document.querySelectorAll('input[name=board]').length`));
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(500);
   say('after rebirth', await h.eval(`document.getElementById('modal-title').textContent + ' prestige=' + __game.state.legacy.prestigeCount + ' points=' + __game.state.legacy.points + ' factions=' + __game.state.run.factions + ' mine=' + __game.state.run.regions.filter(r => r.owner === 0).length`));
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
@@ -49,5 +49,14 @@ export async function run(h) {
   await h.eval(`(() => { const s = JSON.parse(localStorage['landgrab.region.v1']); s.lastSave = Date.now() - 1200e3; localStorage['landgrab.region.v1'] = JSON.stringify(s); localStorage.setItem = () => {}; })()`);
   await h.goto(); await h.wait(1500);
   say('pause', await h.eval(`document.getElementById('hint').textContent + ' / mine=' + __game.state.run.regions.filter(r => r.owner === 0).length + ' elapsed=' + Math.round(__game.state.run.elapsed)`));
+  // 권역 판(수도권)으로 새 판 → 판 밖 지역은 OFF, 화면도 그 권역만
+  await h.eval(`document.getElementById('btn-menu').click()`); await h.wait(200);
+  await h.eval(`document.querySelector('[data-action="restart"]').click()`); await h.wait(200);
+  await h.eval(`document.querySelector('input[name=board][value=capital]').click()`); await h.wait(100);
+  await h.eval(`[...document.querySelectorAll('#modal-actions button')].find(b => b.textContent === '새로 시작').click()`); await h.wait(800);
+  say('capital board', await h.eval(`(() => { const run = __game.state.run; const off = run.regions.filter(r => r.owner === -2).length; return 'board=' + run.board + ' off=' + off + ' active=' + (run.regions.length - off) + ' factions=' + run.factions + ' top=' + document.getElementById('top-regions').textContent + ' scale=' + __game.cam.scale.toFixed(2); })()`));
+  await h.shot(`${SP}/r4_capital_board.png`);
+  // 고립 표시: 내 지역 하나를 멀리 떨어뜨려 본다
+  say('isolated', await h.eval(`(async () => { const { refreshSupply, boardIds, adj } = await import('./src/region/game.js'); const run = __game.state.run; const ids = boardIds('capital'); const far = ids.find(i => run.regions[i].owner === -1 && !adj(run, i).some(n => run.regions[n].owner === 0)); run.regions[far].owner = 0; refreshSupply(__game.state); return 'far=' + far + ' iso=' + run.regions[far].iso + ' panelReady=' + !!document.getElementById('p-stats'); })()`));
   say('console errors', JSON.stringify(h.errors()));
 }

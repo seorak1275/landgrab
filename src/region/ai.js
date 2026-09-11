@@ -1,5 +1,5 @@
 // 사단전 AI: 배치(국경 방어/내부 사단) → 공격 → 집결 → 반란 → 내부 사단 국경으로
-import { PLAYER, NEUTRAL, owned, neighbors, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, bfsOwn, pathTo, party, truce } from './game.js';
+import { PLAYER, NEUTRAL, OFF, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, bfsOwn, pathTo, party, truce } from './game.js';
 import { perkOf } from '../perks.js';
 
 export function aiPeriod(state) { return 8 * (1 + 0.08 * ((state.legacy.upgrades || {}).aiSlow || 0)) * (perkOf(state).aiSlow || 1); }
@@ -11,13 +11,13 @@ export function aiAct(state, f) {
   const mine = owned(state, f); if (!mine.length) return;
   run.aiTurns = run.aiTurns || []; run.aiTurns[f] = (run.aiTurns[f] || 0) + 1;
   const am = attackMul(state, f);
-  const isBorder = r => neighbors(r.id).some(n => run.regions[n].owner !== f);
+  const isBorder = r => adj(run, r.id).some(n => run.regions[n].owner !== f);
   const othersBattle = r => r.battle && !party(r, f);
   const offLimits = r => truce(state) && r.owner === PLAYER; // 초반 휴전
 
   // 0. 반란 (REBEL_EVERY 주기마다, 배치 전에): 풀 합이 넉넉하면 플레이어(없으면 가장 약한 세력) 지역 중 수비가 가장 약한 곳에
   if (run.aiTurns[f] % REBEL_EVERY === 0 && totalPool(state, f) >= REBEL_MIN_POOL) {
-    const targets = run.regions.filter(r => r.owner !== f && r.owner !== NEUTRAL && !offLimits(r) && canRebel(state, f, r.id) && !r.battle)
+    const targets = run.regions.filter(r => r.owner !== f && r.owner !== NEUTRAL && r.owner !== OFF && !offLimits(r) && canRebel(state, f, r.id) && !r.battle)
       .sort((a, b) => (a.owner === PLAYER ? 0 : 1) - (b.owner === PLAYER ? 0 : 1) || (a.def + a.div) - (b.def + b.div));
     const t = targets[0];
     if (t) { const n = Math.min(300, Math.floor(totalPool(state, f) * 0.5)); if (n * 0.7 * am > effectiveDefense(state, t, f) * 1.2) rebel(state, f, t.id, n); }
@@ -38,7 +38,7 @@ export function aiAct(state, f) {
   const options = [];
   for (const r of mine) {
     if (r.div < 20) continue;
-    for (const n of neighbors(r.id)) {
+    for (const n of adj(run, r.id)) {
       const t = run.regions[n]; if (t.owner === f || othersBattle(t) || offLimits(t)) continue;
       const D = effectiveDefense(state, t, f);
       if (r.div * 0.8 * am > D * 1.3) options.push({ r, t, D });
@@ -56,9 +56,9 @@ export function aiAct(state, f) {
   // 3. 집결 (GATHER_EVERY 주기마다, 공격이 없었을 때): 목표에 이어진 내 지역들 사단 합 > 수비×1.5 이면 모두 보낸다
   if (attacks === 0 && run.aiTurns[f] % GATHER_EVERY === 0) {
     let best = null;
-    for (const r of mine) for (const n of neighbors(r.id)) {
+    for (const r of mine) for (const n of adj(run, r.id)) {
       const t = run.regions[n]; if (t.owner === f || othersBattle(t) || offLimits(t)) continue;
-      const comp = neighbors(t.id).filter(id => run.regions[id].owner === f); // 목표에 인접한 내 지역들
+      const comp = adj(run, t.id).filter(id => run.regions[id].owner === f); // 목표에 인접한 내 지역들
       const sum = comp.reduce((s, id) => s + run.regions[id].div * 0.6, 0);
       const D = effectiveDefense(state, t, f);
       if (sum * am > D * 1.5 && (!best || pri(t.owner) - pri(best.t.owner) < 0 || (pri(t.owner) === pri(best.t.owner) && D < best.D))) best = { t, D, comp };

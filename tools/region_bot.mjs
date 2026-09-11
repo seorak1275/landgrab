@@ -2,7 +2,7 @@
 // 방치를 없앤 뒤로 밸런스 기준은 "손을 대면 이기는가" 라서, 사람이 할 만한 수를 그대로 흉내낸다:
 // ① 인력이 남지 않게 계속 배치(국경엔 방어, 가장 앞선 국경 지역에 사단) ② 이길 수 있는 이웃을 친다
 // ③ 한 지역으로 못 이기면 목표에 붙은 내 지역들에서 집결 ④ 그래도 할 게 없고 인력이 차면 반란
-import { PLAYER, NEUTRAL, owned, neighbors, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, poolCap, predict } from '../src/region/game.js';
+import { PLAYER, NEUTRAL, OFF, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, poolCap, predict } from '../src/region/game.js';
 
 export const BOT_EVERY = 5; // 초
 
@@ -10,7 +10,7 @@ export function greedyStep(state, f = PLAYER) {
   const run = state.run;
   const mine = owned(state, f); if (!mine.length) return;
   const am = attackMul(state, f);
-  const isBorder = r => neighbors(r.id).some(n => run.regions[n].owner !== f);
+  const isBorder = r => adj(run, r.id).some(n => run.regions[n].owner !== f);
   const border = mine.filter(isBorder);
 
   // ① 배치: 풀의 80%를 쓴다 — 절반은 방어가 가장 약한 국경 3곳, 절반은 사단이 가장 큰 국경 지역
@@ -28,7 +28,7 @@ export function greedyStep(state, f = PLAYER) {
   const opts = [];
   for (const r of mine) {
     if (r.div < 20) continue;
-    for (const n of neighbors(r.id)) {
+    for (const n of adj(run, r.id)) {
       const t = run.regions[n]; if (t.owner === f) continue;
       if (predict(state, r.id, n, 0.8).win) opts.push({ r, t, D: effectiveDefense(state, t, f) });
     }
@@ -45,9 +45,9 @@ export function greedyStep(state, f = PLAYER) {
   // ③ 집결: 목표에 붙은 내 지역들 사단 합이 수비의 1.5배면 전부 보낸다
   if (attacks === 0) {
     let best = null;
-    for (const r of border) for (const n of neighbors(r.id)) {
+    for (const r of border) for (const n of adj(run, r.id)) {
       const t = run.regions[n]; if (t.owner === f) continue;
-      const comp = neighbors(t.id).filter(id => run.regions[id].owner === f);
+      const comp = adj(run, t.id).filter(id => run.regions[id].owner === f);
       const sum = comp.reduce((s, id) => s + run.regions[id].div * 0.8, 0);
       const D = effectiveDefense(state, t, f);
       if (sum * am > D * 1.5 && (!best || D < best.D)) best = { t, D, comp };
@@ -57,7 +57,7 @@ export function greedyStep(state, f = PLAYER) {
 
   // ④ 반란: 할 게 없고 인력이 한도의 70%를 넘으면 가장 약한 남의 지역에
   if (attacks === 0 && totalPool(state, f) > poolCap(state, f) * 0.7) {
-    const t = run.regions.filter(r => r.owner !== f && r.owner !== NEUTRAL && canRebel(state, f, r.id) && !r.battle)
+    const t = run.regions.filter(r => r.owner !== f && r.owner !== NEUTRAL && r.owner !== OFF && canRebel(state, f, r.id) && !r.battle)
       .sort((a, b) => (a.def + a.div) - (b.def + b.div))[0];
     if (t) rebel(state, f, t.id, 'max');
   }

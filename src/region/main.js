@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, newRun, tick, status, owned, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, neighbors, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO } from './game.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub } from './game.js';
 import { runAi } from './ai.js';
 import { draw, pickRegion, bounds, centerOf } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -22,12 +22,12 @@ let sel = null, inspect = null;
 window.__game = { get state() { return state; }, cam, get sel() { return sel; } };
 
 function resize() { const dpr = window.devicePixelRatio || 1; W = canvas.clientWidth; H = canvas.clientHeight; canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
-function fitAll() { const [x0, y0, x1, y1] = bounds(); cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2; cam.scale = Math.max(0.3, Math.min(6, Math.min((W - 16) / (x1 - x0), (H - 16) / (y1 - y0)))); }
+function fitAll() { const [x0, y0, x1, y1] = bounds(state); cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2; cam.scale = Math.max(0.3, Math.min(6, Math.min((W - 16) / (x1 - x0), (H - 16) / (y1 - y0)))); }
 function focusOn(id) { const [x, y] = centerOf(id); cam.x = x; cam.y = y; cam.scale = Math.max(cam.scale, 2.2); }
 function hms(sec) { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60); return h ? `${h}시간 ${m}분` : `${m}분`; }
 function pointsFor(outcome) {
   const k = difficultyOf(state).points * (1 + 0.1 * (state.legacy.upgrades.pointsMul || 0));
-  return outcome === 'conquered' ? Math.floor((10 + Math.floor(state.run.regions.length / 4)) * k) : Math.max(1, Math.floor(state.run.maxRegions / 4 * k));
+  return outcome === 'conquered' ? Math.floor((10 + Math.floor(activeCount(state) / 4)) * k) : Math.max(1, Math.floor(state.run.maxRegions / 4 * k));
 }
 
 setListener(e => {
@@ -43,20 +43,21 @@ function showRow(id, on) { const el = $(id); if (el.hidden === on) el.hidden = !
 function refresh() {
   if (sel !== null && state.run.regions[sel].owner !== PLAYER) sel = null;
   setText('top-pool', `👥 ${formatNum(totalPool(state, PLAYER))}/${Math.floor(poolCap(state, PLAYER))} (+${totalProd(state, PLAYER).toFixed(1)}/초)`);
-  setText('top-regions', `🏳 ${owned(state, PLAYER).length}/${state.run.regions.length}`);
+  setText('top-regions', `🏳 ${owned(state, PLAYER).length}/${activeCount(state)}`);
   setText('top-prestige', `환생 ${state.legacy.prestigeCount}`);
   setText('top-points', `✨ ${state.legacy.points}`);
   const id = sel !== null ? sel : inspect;
   if (id === null) {
     const perk = PERKS[state.run.perk];
-    setText('p-title', '대한민국 시·군·구 · 지역을 탭하세요');
-    setText('p-stats', `AI ${state.run.factions - 1}세력과 ${state.run.regions.length}개 지역 다툼 · 난이도 ${difficultyOf(state).name}(AI 생산 ×${difficultyOf(state).mul}, 10분마다 +0.1)${perk ? `\n${perk.icon} 축복: ${perk.name} — ${perk.desc}` : ''}`);
+    setText('p-title', `${boardOf(state).name} 사단전 · 지역을 탭하세요`);
+    setText('p-stats', `${boardOf(state).name} · AI ${state.run.factions - 1}세력과 ${activeCount(state)}개 지역 다툼 · 난이도 ${difficultyOf(state).name}(AI 생산 ×${difficultyOf(state).mul}, 10분마다 +0.1)${perk ? `\n${perk.icon} 축복: ${perk.name} — ${perk.desc}` : ''}`);
     for (const r of ['row-def', 'row-div', 'row-move', 'row-rebel']) showRow(r, false);
     return;
   }
   const r = state.run.regions[id], m = info(id), mine = r.owner === PLAYER;
   $('p-title').innerHTML = `<span style="color:${ownerColor(r.owner)}">■</span> ${m.p} ${m.n} · ${ownerName(r.owner)} · ${TRAIT_NAME[m.tr]}`;
   const lines = [`🛡 방어 ${Math.floor(r.def)} · ⚔ 사단 ${Math.floor(r.div)} · 수비 배율 ×${defMul(state, r).toFixed(2)}`];
+  if (r.owner !== NEUTRAL && r.iso) lines.push(`⛓ 고립 — 본국(${r.owner === PLAYER ? info(supplyHub(state, PLAYER)).n : '상대 수도'})과 이어진 길이 끊겨 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}`);
   if (r.owner !== NEUTRAL) lines.push(`생산력 ${prodOf(state, r).toFixed(2)}/초 (${m.t})${mine ? ` · 내 인력 ${Math.floor(totalPool(state, PLAYER))}/${Math.floor(poolCap(state, PLAYER))} (전 지역 합산 +${totalProd(state, PLAYER).toFixed(1)}/초)` : ''}`);
   else lines.push(`중립 · 생산력 ${m.prod}/초 (${m.t}) · 점령하려면 ${Math.floor(r.def * defMul(state, r)) + 1}명 넘게`);
   if (r.battle && r.battle.parties.length) lines.push(`⚔ ${r.battle.parties.length > 1 ? '난전' : '전투 중'}: ${r.battle.parties.map(p => `${ownerName(p.owner)} ${Math.floor(p.size)}`).join(' · ')} vs 수비 ${Math.floor((r.def + r.div))}`);
@@ -75,7 +76,7 @@ function refresh() {
 // ---- 조작 ----
 function onTap(sx, sy) {
   if (isModalOpen()) return;
-  const id = pickRegion(cam, W, H, sx, sy);
+  const id = pickRegion(cam, W, H, sx, sy, state.run);
   if (id === null) { sel = null; inspect = null; refresh(); return; }
   const r = state.run.regions[id];
   if (sel !== null && id !== sel) { // 파병
@@ -98,12 +99,17 @@ function onAct(act, n) {
 // ---- 창 ----
 function mapPickerHtml() {
   const cur = state.legacy.difficulty || DEFAULT_DIFFICULTY;
-  return `<p class="sub">난이도 (AI는 10분마다 +0.1씩 더 세집니다)</p>` + Object.entries(DIFFICULTIES).map(([k, d]) => `<label class="diff-row"><input type="radio" name="diff" value="${k}" ${k === cur ? 'checked' : ''}> ${d.name} <span class="desc">AI 생산 ×${d.mul} · 유산 ×${d.points}</span></label>`).join('');
+  return boardPickerHtml() + `<p class="sub">난이도 (AI는 10분마다 +0.1씩 더 세집니다)</p>` + Object.entries(DIFFICULTIES).map(([k, d]) => `<label class="diff-row"><input type="radio" name="diff" value="${k}" ${k === cur ? 'checked' : ''}> ${d.name} <span class="desc">AI 생산 ×${d.mul} · 유산 ×${d.points}</span></label>`).join('');
 }
 const pickedDifficulty = () => { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : state.legacy.difficulty; };
+function boardPickerHtml() {
+  const cur = state.legacy.boardPref || state.run.board || DEFAULT_BOARD;
+  return `<p class="sub">판 (권역을 고르면 짧고 빠른 판)</p>` + Object.entries(BOARDS).map(([k, b]) => `<label class="diff-row"><input type="radio" name="board" value="${k}" ${k === cur ? 'checked' : ''}> ${b.name} <span class="desc">${b.desc}${b.maxAi < 6 ? ` · AI 최대 ${b.maxAi}` : ''}</span></label>`).join('');
+}
+const pickedBoard = () => { const el = document.querySelector('input[name="board"]:checked'); return el ? el.value : (state.legacy.boardPref || DEFAULT_BOARD); };
 const pickedPerk = () => { const el = document.querySelector('input[name="perk"]:checked'); return el ? el.value : null; };
 function perkPickerHtml(seed) { return `<p class="sub">이번 판 축복 (하나 선택)</p><div class="perk-row">${offerPerks(seed).map((k, i) => `<label><input type="radio" name="perk" value="${k}" ${i === 0 ? 'checked' : ''}><b>${PERKS[k].icon} ${PERKS[k].name}</b><span class="desc">${PERKS[k].desc}</span></label>`).join('')}</div>`; }
-function startNew(seed, perk) { state.run = newRun(seed, state.legacy, perk); sel = null; inspect = null; ended = false; effects = []; fitAll(); focusOn(state.run.regions.findIndex(r => r.owner === PLAYER)); save(); refresh(); }
+function startNew(seed, perk, board = state.legacy.boardPref || DEFAULT_BOARD) { state.legacy.boardPref = board; state.run = newRun(seed, state.legacy, perk, board); sel = null; inspect = null; ended = false; effects = []; fitAll(); focusOn(state.run.regions.findIndex(r => r.owner === PLAYER)); save(); refresh(); }
 function openShop(after = hideModal) {
   const rows = Object.entries(LEGACY_ITEMS).map(([k, it]) => { const lv = state.legacy.upgrades[k] || 0, maxed = lv >= it.max, cost = maxed ? null : itemCost(k, lv); return `<div class="shop-row"><span class="name">${it.name} <b>Lv.${lv}/${it.max}</b><span class="desc">${it.desc}</span></span><button data-action="buy:${k}" ${maxed || state.legacy.points < cost ? 'disabled' : ''}>${maxed ? '완료' : `✨ ${cost}`}</button></div>`; }).join('');
   showModal({ title: `유산 상점 · ✨ ${state.legacy.points}`, html: `<p class="sub">이 모드에선 풍요·징집=생산, 성벽술=수비, 시작 골드=시작 인력, 병참=인력 한도, 약탈=점령 시 인력 흡수. 통치·건축은 효과 없음.</p>${rows}`, actions: [{ label: '닫기', onClick: after, primary: true }],
@@ -115,6 +121,8 @@ function openHelp() {
     <h3>방어 배치 · 사단</h3><p>풀에서 🛡<b>방어인력</b>(그 지역 고정 수비)이나 ⚔<b>사단</b>(움직이는 부대, 지역당 하나, 인원 무제한)으로 옮긴다. +10/+100/+500/최대.</p>
     <h3>파병</h3><p>내 지역 선택 → <b>인접한</b> 지역 탭. 파병 비율(25/50/100%)만큼 사단이 행군(2초)해 내 지역이면 합류, 남의 지역이면 전투. 선택하면 인접 지역이 밝아진다(✓이김/✕짐). 먼 곳은 반란으로.</p>
     <h3>반란</h3><p>남이 가진 지역을 탭 → ✊반란 10/100/500/최대. 내 모든 풀에서 빠지고 10초 뒤 70%가 그 지역 안에서 봉기해 방어+사단과 싸운다. 인접할 필요 없음. AI도 똑같이 한다.</p>
+    <h3>보급 (본국 연결)</h3><p>내 <b>본국</b>(수도, 잃으면 생산력이 가장 큰 내 지역)에서 <b>내 지역만 밟아</b> 닿지 않는 지역은 ⛓<b>고립</b>이다. 고립 지역은 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}이고 지도에서 어둡게 보인다. AI도 똑같이 당하니, 크게 뻗은 AI의 <b>허리를 끊으면</b> 뒤쪽 땅이 한꺼번에 약해진다.</p>
+    <h3>판</h3><p>전국(251곳) 말고 <b>권역 판</b>(수도권·영남·호남충청, 75~79곳)을 고르면 훨씬 짧게 끝난다. 권역마다 특성 분포가 달라 상성이 다르다. ≡ 메뉴의 "난이도 바꿔 새 판"이나 환생 창에서 고른다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
     <h3>끝</h3><p>251개 다 가지면 정복, 지역·사단·반란이 다 없어지면 전멸 → 환생(유산 포인트 → 상점 영구 보너스, 축복 3택1) 후 새 판. 죽어도 다시 하면 된다.</p>
     <h3>AI</h3><p>8초마다 국경엔 방어, 안쪽엔 사단을 만들어 국경으로 보내고, 이길 수 있는 이웃을 치고, 4주기마다 집결, 6주기마다 반란한다. 난이도로 AI 생산 배율을 고른다.</p></div>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
@@ -130,7 +138,7 @@ function openMenu() {
       if (a === 'help') openHelp();
       if (a === 'shop') openShop(openMenu);
       if (a === 'cb') { state.legacy.colorblind = el.checked; setColorblind(el.checked); save(); }
-      if (a === 'restart') showModal({ title: '새 판', html: `<p>이번 판을 버리고 새로 시작합니다(유산 유지, 포인트 없음).</p>${mapPickerHtml()}`, actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => { state.legacy.difficulty = pickedDifficulty(); hideModal(); startNew(Date.now() >>> 0, null); } }] });
+      if (a === 'restart') showModal({ title: '새 판', html: `<p>이번 판을 버리고 새로 시작합니다(유산 유지, 포인트 없음).</p>${mapPickerHtml()}`, actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => { state.legacy.difficulty = pickedDifficulty(); const bd = pickedBoard(); hideModal(); startNew(Date.now() >>> 0, null, bd); } }] });
       if (a === 'export') showModal({ title: '저장 내보내기', html: `<textarea readonly>${JSON.stringify(state)}</textarea>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
       if (a === 'import') showModal({ title: '저장 가져오기', html: `<textarea id="import-text"></textarea><p id="import-msg"></p>`, actions: [{ label: '취소', onClick: hideModal }, { label: '가져오기', primary: true, onClick: () => { try { const o = JSON.parse($('import-text').value); if (!o.run || o.run.mode !== 'region') throw 0; state = o; sel = null; inspect = null; ended = false; fitAll(); save(); hideModal(); refresh(); } catch { $('import-msg').textContent = '형식이 맞지 않습니다.'; } } }] });
       if (a === 'reset') showModal({ title: '정말 삭제할까요?', html: '<p>사단전 모드의 유산·환생 기록까지 전부 사라집니다.</p>', actions: [{ label: '취소', onClick: hideModal }, { label: '삭제', onClick: () => { localStorage.removeItem(SAVE_KEY); state = newState(); sel = null; inspect = null; ended = false; fitAll(); save(); hideModal(); refresh(); } }] });
@@ -141,8 +149,8 @@ function checkEnd() {
   const st = status(state); if (st === 'playing') return;
   ended = true;
   const pts = pointsFor(st), seed = Date.now() >>> 0;
-  showModal({ title: st === 'conquered' ? '🎉 대한민국 통일!' : '💀 전멸…', html: `<p>${st === 'conquered' ? '${state.run.regions.length}개 지역을 모두 차지했습니다.' : '모든 지역과 사단을 잃었습니다. 다시 하면 됩니다.'}</p><p>유산 포인트 <b>+${pts}</b> (최대 ${state.run.maxRegions}개 지역)</p>${perkPickerHtml(seed)}${mapPickerHtml()}`,
-    actions: [{ label: '환생', primary: true, onClick: () => { state.legacy.points += pts; state.legacy.prestigeCount += 1; state.legacy.difficulty = pickedDifficulty(); const pk = pickedPerk(); hideModal(); startNew(seed, pk); openShop(() => { hideModal(); refresh(); }); } }] });
+  showModal({ title: st === 'conquered' ? '🎉 대한민국 통일!' : '💀 전멸…', html: `<p>${st === 'conquered' ? '${activeCount(state)}개 지역을 모두 차지했습니다.' : '모든 지역과 사단을 잃었습니다. 다시 하면 됩니다.'}</p><p>유산 포인트 <b>+${pts}</b> (최대 ${state.run.maxRegions}개 지역)</p>${perkPickerHtml(seed)}${mapPickerHtml()}`,
+    actions: [{ label: '환생', primary: true, onClick: () => { state.legacy.points += pts; state.legacy.prestigeCount += 1; state.legacy.difficulty = pickedDifficulty(); const pk = pickedPerk(), bd = pickedBoard(); hideModal(); startNew(seed, pk, bd); openShop(() => { hideModal(); refresh(); }); } }] });
 }
 // 꺼둔 시간은 정산하지 않는다 (2026-09-11 "방치는 없는걸로"): 나가던 그 상황에서 그대로 이어 한다
 function notePause(elapsed) {
@@ -159,7 +167,7 @@ function loop(now) {
     checkEnd();
   }
   const marks = {};
-  if (sel !== null && state.run.regions[sel].div >= 1) for (const n of neighbors(sel)) marks[n] = state.run.regions[n].owner === PLAYER ? 'move' : predict(state, sel, n, state.run.sendRatio).win ? 'win' : 'lose';
+  if (sel !== null && state.run.regions[sel].div >= 1) for (const n of adj(state.run, sel)) marks[n] = state.run.regions[n].owner === PLAYER ? 'move' : predict(state, sel, n, state.run.sendRatio).win ? 'win' : 'lose';
   draw(ctx, state, cam, W, H, { selected: sel, inspect, effects, marks });
   refresh();
   requestAnimationFrame(loop);

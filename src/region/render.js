@@ -1,19 +1,26 @@
 // 사단전 지도 그리기: 지역 다각형(주인 색), 경계, 뱃길, 라벨(이름·🛡방어·⚔사단·풀 막대), 행군 부대, 반란·전투 연출
-import { MAP, NEUTRAL, PLAYER, party } from './game.js';
+import { MAP, NEUTRAL, PLAYER, OFF, party } from './game.js';
 import { FACTION_COLORS, NEUTRAL_COLOR, ownerColor, ownerTag, isColorblind, worldToScreen, screenToWorld } from '../render.js';
 import { pointInPoly } from '../mapgen.js';
 
 export const SCALE = 1400; // 지도 단위(폭 1) → 월드 픽셀
-export const bounds = () => [0, 0, SCALE, SCALE * MAP.height];
+// 권역 판이면 그 권역만 담는 범위 (판 밖 지역은 그리지 않는다)
+export function bounds(state = null) {
+  if (!state) return [0, 0, SCALE, SCALE * MAP.height];
+  const b = [Infinity, Infinity, -Infinity, -Infinity];
+  state.run.regions.forEach((r, i) => { if (r.owner === OFF) return; const x = bboxes[i]; b[0] = Math.min(b[0], x[0]); b[1] = Math.min(b[1], x[1]); b[2] = Math.max(b[2], x[2]); b[3] = Math.max(b[3], x[3]); });
+  return b[0] === Infinity ? [0, 0, SCALE, SCALE * MAP.height] : [b[0] * SCALE, b[1] * SCALE, b[2] * SCALE, b[3] * SCALE];
+}
 export const centerOf = id => [MAP.regions[id].c[0] * SCALE, MAP.regions[id].c[1] * SCALE];
 const hex = (h, a) => `rgba(${parseInt(h.slice(1, 3), 16)},${parseInt(h.slice(3, 5), 16)},${parseInt(h.slice(5, 7), 16)},${a})`;
 
 // 화면 좌표 → 지역 id (bbox → 점-다각형)
 const bboxes = MAP.regions.map(r => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of r.polys) for (const [x, y] of p) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; });
-export function pickRegion(cam, W, H, sx, sy) {
+export function pickRegion(cam, W, H, sx, sy, run = null) {
   const [wx, wy] = screenToWorld(cam, W, H, sx, sy); const x = wx / SCALE, y = wy / SCALE;
   let best = null;
   for (let i = 0; i < MAP.regions.length; i++) {
+    if (run && run.regions[i].owner === OFF) continue;
     const b = bboxes[i]; if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
     for (const p of MAP.regions[i].polys) if (pointInPoly(p, x, y)) { const r = MAP.regions[i]; const d = (r.c[0] - x) ** 2 + (r.c[1] - y) ** 2; if (!best || d < best.d) best = { i, d }; }
   }
@@ -32,8 +39,10 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
   for (let i = 0; i < MAP.regions.length; i++) {
     if (!visible(i)) continue;
     const r = run.regions[i];
+    if (r.owner === OFF) continue; // 이 판에 없는 지역
     ctx.beginPath(); tracePolys(ctx, cam, W, H, MAP.regions[i]);
     ctx.fillStyle = r.owner === NEUTRAL ? '#3a4a58' : hex(ownerColor(r.owner), 0.6); ctx.fill();
+    if (r.iso) { ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fill(); } // 고립(본국과 끊김)은 어둡게
     const mark = marks[i];
     if (mark) { ctx.fillStyle = mark === 'win' ? 'rgba(111,227,143,0.35)' : mark === 'lose' ? 'rgba(255,123,123,0.35)' : 'rgba(255,255,255,0.18)'; ctx.fill(); }
     if (r.battle) { ctx.fillStyle = `rgba(255,255,255,${0.15 + 0.15 * Math.sin(Date.now() / 120)})`; ctx.fill(); }
@@ -41,13 +50,14 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
   // 2. 경계 (주인 다른 경계는 굵게)
   ctx.lineJoin = 'round';
   for (let i = 0; i < MAP.regions.length; i++) {
-    if (!visible(i)) continue;
+    if (!visible(i) || run.regions[i].owner === OFF) continue;
     ctx.beginPath(); tracePolys(ctx, cam, W, H, MAP.regions[i]);
     ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = Math.max(0.6, 0.9 * s); ctx.stroke();
   }
   // 3. 뱃길
   ctx.setLineDash([6, 5]); ctx.strokeStyle = 'rgba(120,200,255,0.55)'; ctx.lineWidth = 1.5;
-  for (const [a, b] of MAP.sea) { const [ax, ay] = worldToScreen(cam, W, H, ...centerOf(a)), [bx, by] = worldToScreen(cam, W, H, ...centerOf(b)); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); }
+  for (const [a, b] of MAP.sea) {
+    if (run.regions[a].owner === OFF || run.regions[b].owner === OFF) continue; const [ax, ay] = worldToScreen(cam, W, H, ...centerOf(a)), [bx, by] = worldToScreen(cam, W, H, ...centerOf(b)); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); }
   ctx.setLineDash([]);
   // 4. 선택·조사 테두리
   for (const [id, color, w] of [[inspect, '#fff', 2], [selected, '#fff', 3]]) {
@@ -58,7 +68,7 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
   const fs = Math.max(9, Math.min(16, 7 * s));
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (let i = 0; i < MAP.regions.length; i++) {
-    if (!visible(i)) continue;
+    if (!visible(i) || run.regions[i].owner === OFF) continue;
     const r = run.regions[i], m = MAP.regions[i];
     const [cx, cy] = worldToScreen(cam, W, H, ...centerOf(i));
     const showName = s >= 1.6 || i === selected || i === inspect;
@@ -72,7 +82,7 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
     if (showNum) {
       const y = cy + (showName ? fs * 0.6 : 0);
       ctx.font = `bold ${fs}px system-ui, sans-serif`;
-      const txt = r.owner === NEUTRAL ? `🛡${Math.floor(r.def)}` : `🛡${Math.floor(r.def)} ⚔${Math.floor(r.div)}`;
+      const txt = r.owner === NEUTRAL ? `🛡${Math.floor(r.def)}` : `${r.iso ? '⛓' : ''}🛡${Math.floor(r.def)} ⚔${Math.floor(r.div)}`;
       ctx.fillStyle = '#fff'; ctx.strokeText(txt, cx, y); ctx.fillText(txt, cx, y);
       if (isColorblind() && r.owner !== NEUTRAL) { ctx.font = `bold ${fs * 0.8}px system-ui, sans-serif`; ctx.fillStyle = ownerColor(r.owner); ctx.strokeText(ownerTag(r.owner), cx + fs * 2.4, cy - fs * 0.7); ctx.fillText(ownerTag(r.owner), cx + fs * 2.4, cy - fs * 0.7); }
       if (r.battle && r.battle.parties.length) {
