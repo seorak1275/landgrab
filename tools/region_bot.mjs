@@ -2,13 +2,27 @@
 // 방치를 없앤 뒤로 밸런스 기준은 "손을 대면 이기는가" 라서, 사람이 할 만한 수를 그대로 흉내낸다:
 // ① 인력이 남지 않게 계속 배치(국경엔 방어, 가장 앞선 국경 지역에 사단) ② 이길 수 있는 이웃을 친다
 // ③ 한 지역으로 못 이기면 목표에 붙은 내 지역들에서 집결 ④ 그래도 할 게 없고 인력이 차면 반란
-import { PLAYER, NEUTRAL, OFF, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, poolCap, predict } from '../src/region/game.js';
+import { PLAYER, NEUTRAL, OFF, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, poolCap, predict, TECHS, research, hasTech, techCost, atPeace, proposePact, leaderOf } from '../src/region/game.js';
 
 export const BOT_EVERY = 5; // 초
+
+const TECH_ORDER = ['mobilize', 'drill', 'march', 'agit'];
 
 export function greedyStep(state, f = PLAYER) {
   const run = state.run;
   const mine = owned(state, f); if (!mine.length) return;
+
+  // ⓪ 연구: 인력이 넉넉하면 순서대로 (사람도 여유가 생기면 연구부터 한다)
+  for (const key of TECH_ORDER) {
+    if (hasTech(run, f, key)) continue;
+    if (totalPool(state, f) >= techCost(state, f, key) + 150) research(state, f, key);
+    break;
+  }
+  // ⓪ 외교: 내가 선두가 아니면 가장 큰 세력 말고 다른 세력들과 정전을 맺어 등을 지킨다
+  if (leaderOf(state) !== f) {
+    const lead = leaderOf(state);
+    for (let g = 0; g < run.factions; g++) if (g !== f && g !== lead && !atPeace(state, f, g)) proposePact(state, f, g);
+  }
   const am = attackMul(state, f);
   const isBorder = r => adj(run, r.id).some(n => run.regions[n].owner !== f);
   const border = mine.filter(isBorder);

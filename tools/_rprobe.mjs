@@ -1,13 +1,13 @@
-// 사단전 시뮬 추이 실측: node tools/_rprobe.mjs [idle|greedy|aionly] [초] [시드] [난이도]
+// 사단전 시뮬 추이 실측: node tools/_rprobe.mjs [idle|greedy|aionly] [초] [시드] [난이도] [판]
 // greedy = tools/region_bot.mjs 의 능동 플레이어(5초마다 수를 둔다). idle = 아무것도 안 함. aionly = 플레이어 수도를 중립으로 비움
-import { newRun, tick, status, owned, PLAYER, NEUTRAL, totalPool, MAP } from '../src/region/game.js';
+import { newRun, tick, status, owned, PLAYER, NEUTRAL, totalPool } from '../src/region/game.js';
 import { runAi } from '../src/region/ai.js';
 import { greedyStep, BOT_EVERY } from './region_bot.mjs';
 
 const mode = process.argv[2] || 'greedy', T = Number(process.argv[3] || 1800), seed = Number(process.argv[4] || 1);
-const difficulty = process.argv[5] || 'hell';
+const difficulty = process.argv[5] || 'hell', board = process.argv[6] || 'all';
 const legacy = { points: 0, prestigeCount: 0, upgrades: {}, difficulty };
-const state = { legacy, run: newRun(seed, legacy) };
+const state = { legacy, run: newRun(seed, legacy, null, board) };
 if (mode === 'aionly') { const c = state.run.regions.find(r => r.owner === PLAYER); c.owner = NEUTRAL; c.div = 0; }
 const t0 = Date.now();
 const line = t => {
@@ -21,4 +21,4 @@ for (let t = 0; t <= T; t++) {
   if (t % 300 === 0) line(t);
   if (status(state) !== 'playing') { line(t); console.log('END', status(state), 'at', t, `(${(t / 60).toFixed(1)}분)`); break; }
 }
-console.log(`지역 ${MAP.regions.length}개 · 난이도 ${difficulty} · ${Date.now() - t0}ms`);
+console.log(`${board} 판 ${state.run.regions.filter(r => r.owner !== -2).length}개 지역 · 난이도 ${difficulty} · ${Date.now() - t0}ms`);
