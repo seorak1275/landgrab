@@ -5,6 +5,7 @@ import { runAi } from './ai.js';
 import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn, itemLocked } from './prestige.js';
 import { GENERAL_SPECS, GENERALS, drawGeneral, setLead, rankOf, addRecord, checkMedals, recommendDifficulty } from './career.js';
 import { openCareer as openCareerModal, generalPickerHtml, pickedGeneral } from './career_ui.js';
+import { stageFromLocation, loadCampaign, saveCampaign, recordStage, starsFor, nextStage, stageUrl } from './campaign.js';
 import { newState, save, load, serialize, deserialize, SAVE_KEY, FEATURES } from './save.js';
 import { createCamera, draw, pickTile, loadAssets, worldBounds, FACTION_COLORS, ownerColor, setColorblind } from './render.js';
 import { MAPS, DEFAULT_MAP } from './mapgen.js';
@@ -31,6 +32,12 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const cam = createCamera();
 let state = load() || newState(Date.now() >>> 0, DEFAULT_MAP);
+// 전역(단계)로 들어왔으면 그 단계의 지도·난이도로 새 판
+const STAGE = stageFromLocation();
+if (STAGE) {
+  state.legacy.difficulty = STAGE.difficulty; state.legacy.mapPref = STAGE.map;
+  restartOn(state, STAGE.map, Date.now() >>> 0);
+}
 let images = {}, effects = [], acc = 0, saveAcc = 0, last = performance.now(), W = 0, H = 0, ended = false, hiddenAt = 0;
 let sel = [], inspectId = null, multi = false; // sel: 선택한 내 땅 id 목록, inspectId: 남의 땅 정보 보기
 // 병사 수 변화 연출: 타일마다 마지막 정수값·아직 안 띄운 증가분·마지막 표시 시각
@@ -185,7 +192,8 @@ function openMenu() {
     title: '메뉴',
     html: `<p>유산 포인트 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회</p>
       <p>지도: ${(MAPS[state.run.map] || MAPS.hex).name} · 난이도 ${difficultyOf(state).name} <button data-action="map">지도·난이도 바꾸기</button></p>
-      <p><a href="region.html" style="color:#6fb1ff;font-weight:bold">🗺 새 모드: 대한민국 시·군·구 사단전 →</a></p>
+      <p><a href="campaign.html" style="color:#ffd479;font-weight:bold">🏔 전역(단계별 지도) →</a></p>
+      <p><a href="region.html" style="color:#6fb1ff;font-weight:bold">🗺 사단전: 대한민국 시·군·구 →</a></p>
       <p><button data-action="help">📖 도움말</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button></p>
       <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드 (구분 잘 되는 색 + 타일에 주인 글자)</label></p>
       <p><button data-action="reset" style="color:#eb5757">처음부터(전부 삭제)</button></p>`,
@@ -241,10 +249,22 @@ function checkEnd() {
   const medals = checkMedals(state.legacy, rec);
   const gen = drawGeneral(state.legacy, seed), gi = GENERALS.find(g => g.key === gen.key);
   const medalHtml = medals.length ? `<p>🎖 훈장 획득: ${medals.map(m => `<b>${m.icon} ${m.name}</b>`).join(' · ')}</p>` : '';
+  // 전역 단계였다면 별을 기록하고 다음 단계를 안내
+  let stageHtml = '', stageActions = [];
+  if (STAGE) {
+    const camp = loadCampaign();
+    if (recordStage(camp, STAGE.id, st, rec.elapsed)) saveCampaign(camp);
+    const stars = starsFor(STAGE, st, rec.elapsed), nx = nextStage(camp);
+    stageHtml = `<p>${STAGE.icon} <b>${STAGE.n}</b> — ${stars ? `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)} 획득!` : '다음 기회에'}${nx ? ` · 다음 단계: ${nx.icon} ${nx.n}` : ' · 모든 단계 완료!'}</p>`;
+    stageActions = [
+      { label: '단계 목록', onClick: () => { location.href = 'campaign.html'; } },
+      ...(nx ? [{ label: `${nx.icon} 다음 단계`, onClick: () => { location.href = stageUrl(nx); } }] : []),
+    ];
+  }
   showModal({
     title: st === 'conquered' ? '🎉 지도 정복!' : '💀 전멸…',
-    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b> · 최대 ${rec.regions}/${rec.total}칸 · ${hms(rec.elapsed)}</p>${medalHtml}<p>🎖 계급 ${rankOf(state.legacy).name} · 새 장군 <b>${GENERAL_SPECS[gi.spec].icon} ${gi.name} Lv.${gen.level}</b> ${gen.isNew ? '(새로 합류)' : '(경험이 늘었다)'}</p>${generalPickerHtml(state)}${perkPickerHtml(seed)}<p class="sub">다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
-    actions: [{ label: '환생', primary: true, onClick: () => { const mk = pickedMap(), dk = pickedDifficulty(), pk = pickedPerk(); const g = pickedGeneral(); if (g) setLead(state.legacy, g); state.legacy.difficulty = dk; rebirth(state, st, seed, mk, pk); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
+    html: `<p>${st === 'conquered' ? '모든 땅을 차지했습니다.' : '모든 땅을 잃었습니다. 강제 환생합니다.'}</p><p>유산 포인트 <b>+${pts}</b> · 최대 ${rec.regions}/${rec.total}칸 · ${hms(rec.elapsed)}</p>${stageHtml}${medalHtml}<p>🎖 계급 ${rankOf(state.legacy).name} · 새 장군 <b>${GENERAL_SPECS[gi.spec].icon} ${gi.name} Lv.${gen.level}</b> ${gen.isNew ? '(새로 합류)' : '(경험이 늘었다)'}</p>${generalPickerHtml(state)}${perkPickerHtml(seed)}<p class="sub">다음 지도:</p>${mapPickerHtml(state.legacy.mapPref || state.run.map)}`,
+    actions: [...stageActions, { label: STAGE ? '이 판 이어서(환생)' : '환생', primary: true, onClick: () => { const mk = pickedMap(), dk = pickedDifficulty(), pk = pickedPerk(); const g = pickedGeneral(); if (g) setLead(state.legacy, g); state.legacy.difficulty = dk; rebirth(state, st, seed, mk, pk); clearSel(); ended = false; growth.clear(); effects = []; centerOnCapital(); save(state); openShop(() => { hideModal(); refresh(); }); } }],
   });
 }
 

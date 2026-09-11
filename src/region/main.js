@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, maxAiFor, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, retreat, canRetreat, RETREAT_LOSS, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, maxAiFor, ensureMap, mapOfBoard, MAP_NAMES, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, retreat, canRetreat, RETREAT_LOSS, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi, PERSONAS, personaOf, factionName } from './ai.js';
 import { draw, pickRegion, bounds, centerOf, regionBox, refreshGeometry } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -9,6 +9,7 @@ import { SAVE_KEY, newState, save as saveTo, load as loadFrom } from './save.js'
 import { DIFFICULTIES, DEFAULT_DIFFICULTY } from '../sim.js';
 import { PERKS, offerPerks } from '../perks.js';
 import { GENERALS, GENERAL_SPECS, drawGeneral, setLead, rankOf, addRecord, checkMedals, recommendDifficulty } from '../career.js';
+import { stageFromLocation, loadCampaign, saveCampaign, recordStage, starsFor, nextStage, stageUrl } from '../campaign.js';
 import { openCareer as openCareerModal, generalPickerHtml, pickedGeneral } from '../career_ui.js';// 화면이 하얗게 뜨는 일을 막는다: 오류를 눈에 보이게 (휴대폰에선 콘솔을 볼 수 없다)
 function showFatal(msg) {
   let el = document.getElementById('fatal');
@@ -34,6 +35,8 @@ const ownerName = o => (o === NEUTRAL || o === OFF ? '중립' : o === PLAYER ? '
 
 function save(s = state) { saveTo(s); }
 let state = loadFrom() || newState();
+// 전역(단계)로 들어왔으면 그 단계의 판·난이도·시작지로 새 판을 연다
+const STAGE = stageFromLocation();
 let W = 0, H = 0, acc = 0, saveAcc = 0, last = performance.now(), ended = false, hiddenAt = 0, effects = [];
 let sel = null, inspect = null;
 window.__game = { get state() { return state; }, cam, get sel() { return sel; } };
@@ -183,7 +186,11 @@ function mapPickerHtml() {
 const pickedDifficulty = () => { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : state.legacy.difficulty; };
 function boardPickerHtml() {
   const cur = state.legacy.boardPref || state.run.board || DEFAULT_BOARD;
-  return `<p class="sub">판 (권역을 고르면 짧고 빠른 판)</p>` + Object.entries(BOARDS).map(([k, b]) => `<label class="diff-row"><input type="radio" name="board" value="${k}" ${k === cur ? 'checked' : ''}> ${b.name} <span class="desc">${b.desc} · AI 최대 ${maxAiFor(k)}</span></label>`).join('')
+  const groups = { sgg: [], world: [] };
+  for (const [k, b] of Object.entries(BOARDS)) groups[b.map || 'sgg'].push([k, b]);
+  const rows = g => g.map(([k, b]) => `<label class="diff-row"><input type="radio" name="board" value="${k}" ${k === cur ? 'checked' : ''}> ${b.name} <span class="desc">${b.desc} · AI 최대 ${maxAiFor(k)}</span></label>`).join('');
+  return `<p class="sub">판 — 🇰🇷 ${MAP_NAMES.sgg}</p>${rows(groups.sgg)}`
+    + `<p class="sub">🌐 ${MAP_NAMES.world} (나라가 칸, 대륙이 완전 점령 단위)</p>${rows(groups.world)}`
     + `<div id="home-pick">${homePickerHtml(cur)}</div>`;
 }
 const TAG_COLOR = { '쉬움': '#6fe38f', '보통': '#8fd0ff', '어려움': '#ffd479', '도전': '#ff9c9c' };
@@ -202,7 +209,7 @@ function wireBoardPicker() {
 const pickedPerk = () => { const el = document.querySelector('input[name="perk"]:checked'); return el ? el.value : null; };
 function perkPickerHtml(seed) { return `<p class="sub">이번 판 축복 (하나 선택)</p><div class="perk-row">${offerPerks(seed).map((k, i) => `<label><input type="radio" name="perk" value="${k}" ${i === 0 ? 'checked' : ''}><b>${PERKS[k].icon} ${PERKS[k].name}</b><span class="desc">${PERKS[k].desc}</span></label>`).join('')}</div>`; }
 function openCareer(after = hideModal) { openCareerModal({ state, save: () => save(), after, mode: 'region', boardName: k => (BOARDS[k] || {}).name, canChangeLead: () => truce(state) || !state.legacy.lead }); }
-function startNew(seed, perk, board = state.legacy.boardPref || DEFAULT_BOARD, home = state.legacy.homePref) { state.legacy.boardPref = board; if (home) state.legacy.homePref = home; state.run = newRun(seed, state.legacy, perk, board, home); sel = null; inspect = null; ended = false; effects = []; fitAll(); focusOn(state.run.regions.findIndex(r => r.owner === PLAYER)); save(); refresh(); }
+async function startNew(seed, perk, board = state.legacy.boardPref || DEFAULT_BOARD, home = state.legacy.homePref) { state.legacy.boardPref = board; if (home) state.legacy.homePref = home; await ensureMap(mapOfBoard(board)); refreshGeometry(); state.run = newRun(seed, state.legacy, perk, board, home); sel = null; inspect = null; ended = false; effects = []; fitAll(); focusOn(state.run.regions.findIndex(r => r.owner === PLAYER)); save(); refresh(); }
 function openShop(after = hideModal) {
   const rows = Object.entries(LEGACY_ITEMS).map(([k, it]) => {
     const lv = state.legacy.upgrades[k] || 0, maxed = lv >= it.max, locked = itemLocked(it, state.legacy), cost = maxed ? null : itemCost(k, lv);
@@ -343,7 +350,8 @@ function openHelp() {
     <h3>보급 (본국 연결)</h3><p>내 <b>본국</b>(수도, 잃으면 생산력이 가장 큰 내 지역)에서 <b>내 지역만 밟아</b> 닿지 않는 지역은 ⛓<b>고립</b>이다. 고립 지역은 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}이고 지도에서 어둡게 보인다. AI도 똑같이 당하니, 크게 뻗은 AI의 <b>허리를 끊으면</b> 뒤쪽 땅이 한꺼번에 약해진다.</p>
     <h3>기록</h3><p>패널의 📜<b>기록</b>에 점령·상실·봉기·배신·격파·연구가 최근 30건까지 남는다. [보기]를 누르면 그 지역으로 간다. 정전 중인 세력 땅에는 흰 점선 테두리가 뜬다.</p>
     <h3>화면</h3><p>한 손가락으로 밀어 이동, 두 손가락으로 확대·축소(많이 들어갈 수 있다), ⌖로 전체 보기. 서울처럼 작은 구는 확대해야 이름이 뜬다. ≡ 메뉴의 🔍<b>지역 찾기</b>에 이름 일부를 넣으면 그 지역으로 바로 옮겨 준다.</p>
-    <h3>판</h3><p>전국(251곳) 말고 <b>권역 판</b>(수도권·영남·호남충청, 75~79곳)을 고르면 훨씬 짧게 끝난다. 권역마다 특성 분포가 달라 상성이 다르다. ≡ 메뉴의 "난이도 바꿔 새 판"이나 환생 창에서 고른다.</p>
+    <h3>판과 지도</h3><p>대한민국 지도는 전국(251곳)과 <b>권역 판</b>(수도권·영남·호남충청, 75~79곳). <b>세계 지도</b>로 가면 <b>나라가 칸</b>이고 대륙이 시·도 자리다 — 아시아(47)·유럽(39)·아메리카(31)·아프리카(51)·전 세계(175). 세계 판에선 대륙을 통째로 가지면 완전 점령 보너스가 붙는다. ≡ 메뉴의 "난이도 바꿔 새 판"이나 환생 창에서 고른다.</p>
+    <h3>전역(단계)</h3><p>≡ 메뉴의 🏔<b>전역</b>은 단계마다 지도가 바뀌는 모드다. 육각 평원 → 서울 → 대한민국 → 권역 사단전 → 전국 → 아시아 → 유럽 → 아메리카 → 아프리카 → 전 세계. 정복하면 다음이 열리고 빠를수록 별을 더 받는다. 유산·계급·장군은 그대로 이어진다.</p>
     <h3>퇴각</h3><p>전투 중인 지역을 고르면 🏃<b>퇴각</b>이 뜬다. 인원의 ${Math.round(RETREAT_LOSS * 100)}%를 잃고 옆에 붙은 내 땅으로 물러난다(수비 중이면 사단만, 방어인력은 자리를 지킨다). 질 싸움에 병력을 다 갈아 넣지 않아도 된다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
     <h3>환생에 남는 것</h3><p>판이 끝나면 전적에 남고, 조건을 채우면 🎖<b>훈장</b>을 받는다. 환생·정복으로 <b>공적</b>이 쌓여 계급(이등병→대장)이 오르고 계급마다 생산이 는다. 환생할 때마다 <b>장군</b>을 한 명 얻어(같은 장군이면 레벨 +1) 그 판에 앞장세운다 — 돌격(공격)·수성(수비)·기동(행군)·조련(생산) 특기에 레벨당 5%. ≡ 메뉴 🎖전적·계급에서 본다. 유산 상점의 상위 4종(보급술·연구소·사절·통솔)은 환생을 몇 번 해야 열린다.</p>
@@ -356,7 +364,7 @@ function openMenu() {
     <p><button data-action="status">📊 전황</button> <button data-action="help">📖 도움말</button> <button data-action="find">🔍 지역 찾기</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="restart">난이도 바꿔 새 판</button></p>
     <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드</label></p>
     <p><button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button> <button data-action="reset" style="color:#eb5757">처음부터</button></p>
-    <p><a href="index.html" style="color:#6fb1ff">⬡ 육각 모드로 가기</a></p>
+    <p><a href="campaign.html" style="color:#ffd479;font-weight:bold">🏔 전역(단계별 지도)</a> · <a href="index.html" style="color:#6fb1ff">⬡ 육각 모드</a></p>
     <p class="sub">빌드 ${BUILD} · 지도 ${MAP.regions.reduce((s, r) => s + r.polys.reduce((t, p) => t + p.length, 0), 0)}점</p>`,
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
     onBodyClick: (a, el) => {
@@ -391,19 +399,33 @@ function checkEnd() {
   const gi = GENERALS.find(g => g.key === gen.key);
   save();
   const medalHtml = medals.length ? `<p>🎖 훈장 획득: ${medals.map(m => `<b>${m.icon} ${m.name}</b> <span class="desc">${m.desc}</span>`).join(' · ')}</p>` : '';
+  // 전역 단계였다면 별을 기록하고 다음 단계를 안내한다
+  let stageHtml = '', stageActions = [];
+  if (STAGE) {
+    const camp = loadCampaign();
+    const row = recordStage(camp, STAGE.id, st, rec.elapsed);
+    if (row) saveCampaign(camp);
+    const stars = starsFor(STAGE, st, rec.elapsed);
+    const nx = nextStage(camp);
+    stageHtml = `<p>${STAGE.icon} <b>${STAGE.n}</b> — ${stars ? `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)} 획득!` : '다음 기회에'}${nx ? ` · 다음 단계: ${nx.icon} ${nx.n}` : ' · 모든 단계 완료!'}</p>`;
+    stageActions = [
+      { label: '단계 목록', onClick: () => { location.href = 'campaign.html'; } },
+      ...(nx ? [{ label: `${nx.icon} 다음 단계`, onClick: () => { location.href = stageUrl(nx); } }] : []),
+    ];
+  }
   showModal({
     title: st === 'conquered' ? `🎉 ${boardOf(state).name} 통일!` : '💀 전멸…',
     html: `<p>${st === 'conquered' ? `${total}개 지역을 모두 차지했습니다.` : '모든 지역과 사단을 잃었습니다. 다시 하면 됩니다.'}</p>
       <p>유산 포인트 <b>+${pts}</b> · 최대 ${rec.regions}개 지역 · ${hms(rec.elapsed)}${rec.killed ? ` · AI ${rec.killed}세력 격파` : ''}${rec.betrayals ? ` · 배신 ${rec.betrayals}회` : ''}</p>
-      ${medalHtml}
+      ${stageHtml}${medalHtml}
       <p>🎖 계급 ${rankOf(state.legacy).name} · 새 장군 <b>${GENERAL_SPECS[gi.spec].icon} ${gi.name} Lv.${gen.level}</b> ${gen.isNew ? '(새로 합류)' : '(경험이 늘었다)'}</p>
       ${generalPickerHtml(state)}${perkPickerHtml(seed)}${mapPickerHtml()}`,
-    actions: [{ label: '환생', primary: true, onClick: () => {
+    actions: [...stageActions, { label: STAGE ? '이 판 이어서(환생)' : '환생', primary: true, onClick: () => {
       state.legacy.points += pts; state.legacy.prestigeCount += 1;
       state.legacy.difficulty = pickedDifficulty();
       const g = pickedGeneral(); if (g) setLead(state.legacy, g);
-      const pk = pickedPerk(), bd = pickedBoard();
-      hideModal(); startNew(seed, pk, bd); openShop(() => { hideModal(); refresh(); });
+      const pk = pickedPerk(), bd = pickedBoard(), hm = pickedHome();
+      hideModal(); startNew(seed, pk, bd, hm); openShop(() => { hideModal(); refresh(); });
     } }],
   });
   wireBoardPicker();
@@ -440,7 +462,10 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-function init() {
+async function init() {
+  // 저장된 판이 세계 지도면 그 지도를 먼저 받는다 (안 그러면 엉뚱한 모양이 그려진다)
+  try { await ensureMap(state.run.mapKey || 'sgg'); refreshGeometry(); } catch {}
+  if (STAGE) { state.legacy.difficulty = STAGE.difficulty; await startNew(Date.now() >>> 0, null, STAGE.board, STAGE.home); }
   resize(); window.addEventListener('resize', resize);
   // 패널 줄이 나타나고 사라지면 캔버스 높이가 바뀐다 → 좌표가 어긋나지 않게 캔버스 크기 변화를 직접 본다
   if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);

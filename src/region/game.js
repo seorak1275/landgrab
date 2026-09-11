@@ -1,28 +1,49 @@
 // 사단전 모드 순수 시뮬 (docs/superpowers/specs/2026-09-06-region-division-mode.md)
 // 지역 = 칸. 모든 내 지역의 생산력이 세력 하나의 인력 풀(run.pool[f], 한도 500)에 모이고 → 어느 지역이든 방어인력 / 사단으로 배치. 사단은 인접 그래프를 행군. 남의 지역엔 반란.
-import MAP from '../maps/sgg.js';
+import SGG from '../maps/sgg.js';
 import { mulberry32 } from '../rng.js';
 import { PERKS, perkOf } from '../perks.js';
 import { DIFFICULTIES, DEFAULT_DIFFICULTY } from '../sim.js';
 import { rankBonus, generalMul } from '../career.js';
 
-export { MAP };
+// 지도는 여러 장이다: 대한민국 시·군·구(sgg)와 세계(world). 모듈 바인딩이라 바꾸면 다른 파일에서도 같이 바뀐다
+export let MAP = SGG;
+export const MAP_NAMES = { sgg: '대한민국 시·군·구', world: '세계' };
+export function setMap(data) { MAP = data; boardCache.clear(); provCache.clear(); }
+// 세계 지도는 클 때만 받는다 (첫 화면을 가볍게)
+export async function ensureMap(key) {
+  if (MAP.key === key) return MAP;
+  setMap(key === 'world' ? (await import('../maps/world.js')).default : SGG);
+  return MAP;
+}
+export const mapOfBoard = board => (BOARDS[board] || BOARDS[DEFAULT_BOARD]).map || 'sgg';
 export const PLAYER = 0, NEUTRAL = -1, OFF = -2; // OFF = 이 판(권역)에 없는 지역
 export const ISO_PROD = 0.4, ISO_DEF = 0.8; // 고립(본국과 내 지역으로 이어지지 않음) 지역의 생산·수비 배율
 // 권역 판: 같은 시·군·구 데이터에서 일부만 잘라 쓴다 (지역이 적어 판이 짧고, 특성 분포가 달라 상성이 다르다)
 export const BOARDS = {
   // home = 기본 시작 지역. 예전엔 속초시·울진군처럼 어려운 곳이 기본이었다
   // ("강원도에서 항상 시작하는 건 너무 힘들다") → 기본은 무난한 곳, 어려운 곳은 골라서 가는 재미로
-  all:      { name: '전국',      ps: null,                                                      home: '수원 장안구', desc: '251개 시·군·구 · 길고 넓은 판' },
-  capital:  { name: '수도권',    ps: ['서울', '인천', '경기'],                                   home: '고양 덕양구', desc: '서울·인천·경기 79곳 · 🏙도시가 많아 병영·사단 싸움' },
-  yeongnam: { name: '영남',      ps: ['부산', '대구', '울산', '경북', '경남'],                    home: '창원 의창구', desc: '부산·대구·울산·경북·경남 75곳 · ⛰산악 수비가 세다' },
-  honam:    { name: '호남·충청', ps: ['광주', '대전', '세종', '충북', '충남', '전북', '전남'],     home: '광주 북구', desc: '광주·대전·세종·충청·전라 77곳 · 🌾평야라 치고받기 쉽다' },
+  all:      { name: '전국', map: 'sgg', size: 251, ps: null,                                                      home: '수원 장안구', desc: '251개 시·군·구 · 길고 넓은 판' },
+  capital:  { name: '수도권', map: 'sgg', size: 79, ps: ['서울', '인천', '경기'],                                   home: '고양 덕양구', desc: '서울·인천·경기 79곳 · 🏙도시가 많아 병영·사단 싸움' },
+  yeongnam: { name: '영남', map: 'sgg', size: 75, ps: ['부산', '대구', '울산', '경북', '경남'],                    home: '창원 의창구', desc: '부산·대구·울산·경북·경남 75곳 · ⛰산악 수비가 세다' },
+  honam:    { name: '호남·충청', map: 'sgg', size: 77, ps: ['광주', '대전', '세종', '충북', '충남', '전북', '전남'],     home: '광주 북구', desc: '광주·대전·세종·충청·전라 77곳 · 🌾평야라 치고받기 쉽다' },
+  // 세계: 나라가 칸, 대륙이 시·도 자리 (대륙을 다 가지면 완전 점령 보너스)
+  asia:     { name: '아시아',     map: 'world', size: 47, ps: ['아시아'],                      home: '대한민국', desc: '47개 나라 · 내 나라에서 시작한다' },
+  europe:   { name: '유럽',       map: 'world', size: 39, ps: ['유럽'],                        home: '프랑스',   desc: '39개 나라 · 좁고 빽빽해 국경이 맞닿는다' },
+  americas: { name: '아메리카',   map: 'world', size: 31, ps: ['북아메리카', '남아메리카'],     home: '미국',     desc: '31개 나라 · 남북으로 길다' },
+  africa:   { name: '아프리카',   map: 'world', size: 51, ps: ['아프리카'],                    home: '이집트',   desc: '51개 나라 · 가장 넓은 대륙 판' },
+  world:    { name: '전 세계',    map: 'world', size: 175, ps: null,                            home: '대한민국', desc: '175개 나라 · 여섯 대륙' },
 };
 export const DEFAULT_BOARD = 'all';
 // AI 수는 판 크기에서 뽑는다: 지역 45곳당 한 세력(최소 2, 최대 6).
 // 권역 판(75~79곳)에 전국과 같은 4~6세력을 넣었더니 전국보다 3배 빽빽해 보통 난이도에서도 무너졌다
 export const REGIONS_PER_AI = 45;
-export function maxAiFor(board) { return Math.max(2, Math.min(6, Math.round(boardIds(board).length / REGIONS_PER_AI))); }
+export function maxAiFor(board) {
+  const b = BOARDS[board] || BOARDS[DEFAULT_BOARD];
+  // 그 판의 지도를 아직 안 받았으면 적어 둔 크기로 (목록에서 AI 수를 보여 줘야 한다)
+  const n = (b.map || 'sgg') === MAP.key ? boardIds(board).length : (b.size || 0);
+  return Math.max(2, Math.min(6, Math.round(n / REGIONS_PER_AI)));
+}
 // 시작 지역(수도) 후보. 속초는 산악(중립 수비 ×1.5)에 이웃 셋이 전부 군(생산 1)이라 가장 불리하다 —
 // "강원도에서 항상 시작하는 건 너무 힘들다"는 피드백으로 고를 수 있게 했다. 난이도는 봇 실측으로 붙였다
 // tag/desc 는 봇 실측(지옥, 시드 5개 평균 10분 지역 수)으로 붙였다
@@ -55,6 +76,37 @@ export const HOMES = {
     { n: '해남군',      tag: '어려움', desc: '땅끝, 한쪽으로만 나간다 (10분 47곳)' },
     { n: '천안 서북구', tag: '도전',   desc: '북쪽 끝에서 남으로 밀고 내려간다 (10분 31곳)' },
   ],
+  // 세계 판: 나라가 칸
+  asia: [
+    { n: '대한민국', tag: '보통',   desc: '이웃은 북한과 일본(뱃길). 바다 건너로 뻗는다' },
+    { n: '중화인민공화국', tag: '쉬움', desc: '이웃이 14개로 가장 많다 — 사방으로 나간다' },
+    { n: '인도',     tag: '보통',   desc: '남아시아를 먼저 묶는다' },
+    { n: '일본',     tag: '도전',   desc: '섬나라. 뱃길 하나로 시작한다' },
+  ],
+  europe: [
+    { n: '프랑스',   tag: '쉬움',   desc: '서유럽 한복판, 국경이 많다' },
+    { n: '독일',     tag: '보통',   desc: '중앙유럽에서 사방으로' },
+    { n: '폴란드',   tag: '보통',   desc: '동서 사이 길목' },
+    { n: '영국',     tag: '도전',   desc: '섬나라. 상륙부터 해야 한다' },
+  ],
+  americas: [
+    { n: '미국',     tag: '쉬움',   desc: '북아메리카의 중심' },
+    { n: '브라질',   tag: '보통',   desc: '남아메리카 절반과 국경을 맞댄다' },
+    { n: '멕시코',   tag: '보통',   desc: '남북을 잇는 허리' },
+    { n: '칠레',     tag: '도전',   desc: '남쪽 끝에서 올라간다' },
+  ],
+  africa: [
+    { n: '이집트',   tag: '보통',   desc: '북동쪽 관문' },
+    { n: '나이지리아', tag: '쉬움', desc: '서아프리카 중심, 이웃이 많다' },
+    { n: '콩고 민주 공화국', tag: '보통', desc: '한가운데서 사방으로 (이웃 9)' },
+    { n: '남아프리카 공화국', tag: '도전', desc: '최남단에서 밀고 올라간다' },
+  ],
+  world: [
+    { n: '대한민국', tag: '보통',   desc: '동아시아에서 시작해 세계로' },
+    { n: '미국',     tag: '쉬움',   desc: '가장 센 나라로 시작' },
+    { n: '프랑스',   tag: '보통',   desc: '유럽을 먼저 묶는다' },
+    { n: '브라질',   tag: '어려움', desc: '남아메리카에서 출발' },
+  ],
 };
 export const homesOf = board => HOMES[board] || HOMES[DEFAULT_BOARD];
 export const homeNames = board => homesOf(board).map(h => h.n);
@@ -63,24 +115,24 @@ export const homeNames = board => homesOf(board).map(h => h.n);
 export const PROV_PROD = 0.3, PROV_DEF = 0.15;
 const boardCache = new Map();
 export function boardIds(key = DEFAULT_BOARD) {
-  if (!boardCache.has(key)) {
-    const b = BOARDS[key] || BOARDS[DEFAULT_BOARD];
-    boardCache.set(key, MAP.regions.map((m, i) => i).filter(i => !b.ps || b.ps.includes(MAP.regions[i].p)));
-  }
-  return boardCache.get(key);
+  const b = BOARDS[key] || BOARDS[DEFAULT_BOARD];
+  const ck = `${MAP.key}:${key}`;
+  if (!boardCache.has(ck)) boardCache.set(ck, MAP.regions.map((m, i) => i).filter(i => !b.ps || b.ps.includes(MAP.regions[i].p)));
+  return boardCache.get(ck);
 }
 export function boardOf(state) { return BOARDS[state.run.board] || BOARDS[DEFAULT_BOARD]; }
 export const provinceOf = id => MAP.regions[id].p;
 const provCache = new Map();
 // 판 안의 시·도 → 지역 id 목록 (지역이 2곳 이상인 시·도만 보너스 대상)
 export function provinceIds(board = DEFAULT_BOARD) {
-  if (!provCache.has(board)) {
+  const ck = `${MAP.key}:${board}`;
+  if (!provCache.has(ck)) {
     const m = new Map();
     for (const id of boardIds(board)) { const p = provinceOf(id); if (!m.has(p)) m.set(p, []); m.get(p).push(id); }
     for (const [p, ids] of [...m]) if (ids.length < 2) m.delete(p);
-    provCache.set(board, m);
+    provCache.set(ck, m);
   }
-  return provCache.get(board);
+  return provCache.get(ck);
 }
 // 그 시·도를 통째로 가진 세력 (없으면 null)
 export function provinceHolder(run, p) {
@@ -242,7 +294,7 @@ export function newRun(seed, legacy = {}, perk = null, board = legacy.boardPref 
     return { id, owner: NEUTRAL, def: Math.round((15 + m.prod * 20) * (0.8 + rand() * 0.5) * garrisonMul), div: 0 }; // 구 55·시 45·군 35 안팎
   });
   const pool = Array(factions).fill(100); pool[PLAYER] = 300 + 100 * (up.startGold || 0) + (pk.startGold || 0);
-  const run = { seed, mode: 'region', board: bd, home, factions, personas: assignPersonas(seed, factions), regions, pool, capitals, tech: Array.from({ length: factions }, () => ({})), rel: Array.from({ length: factions }, () => Array(factions).fill(0)), pacts: {}, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
+  const run = { seed, mode: 'region', mapKey: MAP.key, board: bd, home, factions, personas: assignPersonas(seed, factions), regions, pool, capitals, tech: Array.from({ length: factions }, () => ({})), rel: Array.from({ length: factions }, () => Array(factions).fill(0)), pacts: {}, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
   refreshSupply({ legacy, run });
   return run;
 }

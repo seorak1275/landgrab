@@ -1,5 +1,16 @@
 # 땅따먹기
 
+## 🏔 전역 — 단계마다 지도가 바뀐다 (campaign.html)
+
+육각 평원 → 서울 → 대한민국 → 수도권·호남충청·영남 사단전 → 전국 → **아시아 → 유럽 → 아메리카 → 아프리카 → 전 세계**.
+앞 단계를 정복하면 다음 지도가 열리고, 빠를수록 별(★★★)을 받는다. 유산·계급·장군은 자유 모드와 그대로 이어진다.
+진행은 `landgrab.campaign.v1`에 따로 저장된다.
+
+## 🌐 세계 지도
+
+나라가 칸이다(175개국, Natural Earth 110m · 한글 이름). 국경이 인접, 섬은 뱃길, **대륙이 시·도 자리**라 대륙을 통째로 가지면
+완전 점령 보너스가 붙는다. 아시아·유럽·아메리카·아프리카·전 세계 판이 있고, 지도는 그 판을 고를 때 받아 온다(140KB).
+
 아이폰 사파리에서 여는 방치형 육각 타일 정복 게임. 성(타일)을 업그레이드해 골드와 병사를
 생산하고, 병사를 보내 땅을 정복한다. AI 세력이 같은 규칙으로 경쟁하며, 지도를 전부
 정복하면 환생해 영구 보너스(유산)를 사고 더 큰 지도에서 다시 시작한다. **방치는 없다** — 창을 닫으면
@@ -70,6 +81,7 @@ node tools/probe.mjs greedy 3 7200 korea      # 육각 시뮬 추이 실측 (idl
 node tools/_rprobe.mjs greedy 3600 1 hell     # 사단전 추이 실측 (능동 플레이어 봇은 tools/region_bot.mjs)
 node tools/cdp.mjs http://localhost:8765/ tools/smoke.mjs   # 헤드리스 크롬 화면 검증
 node tools/build_maps.mjs       # 행정구역 GeoJSON → src/maps/*.js (원본은 tools/geo/ 에 내려받음)
+node tools/build_world.mjs      # 세계 GeoJSON → src/maps/world.js (나라·국경·뱃길·대륙)
 node tools/build_sgg.mjs        # 시·군·구 고해상도 원본(55MB) → src/maps/sgg.js(가벼운 판 168KB) + sgg_detail.js(정밀본 903KB, 화면이 뜬 뒤 배경에서 받아 갈아 끼움). 2~3분
 ```
 

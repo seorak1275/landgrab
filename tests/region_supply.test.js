@@ -12,7 +12,7 @@ function mk(seed = 1, board = 'all', legacy = {}) {
 const cap = (s, f) => s.run.regions.find(r => r.owner === f);
 
 test('권역 판: 전국 251 / 수도권·영남·호남충청은 그 권역만, 나머지는 판에 없다(OFF)', () => {
-  assert.deepEqual(Object.keys(BOARDS), ['all', 'capital', 'yeongnam', 'honam']);
+  assert.deepEqual(Object.keys(BOARDS).filter(k => BOARDS[k].map !== 'world'), ['all', 'capital', 'yeongnam', 'honam']);
   assert.equal(boardIds('all').length, 251);
   for (const key of ['capital', 'yeongnam', 'honam']) {
     const b = BOARDS[key], ids = boardIds(key);

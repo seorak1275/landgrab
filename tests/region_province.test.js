@@ -67,20 +67,22 @@ test('tick이 시·도 보너스를 갱신한다', () => {
   assert.equal(provinceHolder(s.run, '서울'), PLAYER);
 });
 
-test('시작 지역: 판마다 고를 수 있고, 이름이 다 판 안에 있다', async () => {
+test('시작 지역: 판마다 고를 수 있고, 이름이 다 판 안에 있다 (세계 판 포함)', async () => {
   const g = await import('../src/region/game.js');
   for (const [board, list] of Object.entries(g.HOMES)) {
+    await g.ensureMap((g.BOARDS[board] || {}).map || 'sgg'); // 그 판의 지도를 올려 두고 본다
     const ids = new Set(g.boardIds(board));
     assert.ok(list.length >= 4, board);
     for (const h of list) {
-      const i = MAP.regions.findIndex(r => r.n === h.n);
+      const i = g.MAP.regions.findIndex(r => r.n === h.n);
       assert.ok(i >= 0 && ids.has(i), `${board}: ${h.n}`);
       assert.ok(h.tag && h.desc, h.n);
     }
     // 기본 수도도 목록에 있어야 고른 뒤 되돌릴 수 있다
     assert.ok(list.some(h => h.n === g.BOARDS[board].home), `${board} 기본 ${g.BOARDS[board].home}`);
   }
-  // 고른 곳에서 시작한다
+  // 고른 곳에서 시작한다 (대한민국 지도로 돌아와서)
+  await g.ensureMap('sgg');
   const l = { points: 0, prestigeCount: 0, upgrades: {}, difficulty: 'normal' };
   const run = g.newRun(5, l, null, 'all', '수원 장안구');
   assert.equal(MAP.regions[run.regions.find(r => r.owner === PLAYER).id].n, '수원 장안구');

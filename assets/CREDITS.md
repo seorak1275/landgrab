@@ -15,3 +15,5 @@
 - 시·군·구 경계(사단전): 같은 저장소의 **고해상도** `skorea_municipalities_geo.json`(55MB) — 확대해도 깨지지 않게 2026-09-11부터 `_simple` 대신 이것을 받아 `tools/build_sgg.mjs`가 지역 크기에 맞춰 직접 단순화한다
 - 서울특별시 자치구 경계: southkorea/seoul-maps (Apache 2.0) https://github.com/southkorea/seoul-maps
 - 게임용으로 단순화·정규화했고 235km² 미만 섬과 울릉도·독도는 격자에 잡히지 않아 뺐다.
+
+- 세계 국경: Natural Earth 110m admin-0 (public domain) https://github.com/nvkelso/natural-earth-vector — 한글 이름(NAME_KO)과 대륙(CONTINENT) 포함

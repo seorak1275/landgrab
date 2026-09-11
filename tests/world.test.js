@@ -1,58 +1,50 @@
+// 세계 지도 (나라가 칸, 대륙이 시·도 자리)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateRun, radiusFor, aiCountFor, neutralGarrison, PLAYER, NEUTRAL, TERRAIN } from '../src/world.js';
-import { distance } from '../src/hex.js';
+import { BOARDS, MAP, ensureMap, setMap, boardIds, provinceIds, newRun, tick, status, owned, adj, bfsDist, maxAiFor, PLAYER, NEUTRAL, OFF } from '../src/region/game.js';
+import { runAi } from '../src/region/ai.js';
+import SGG from '../src/maps/sgg.js';
 
-test('반지름·AI 수 공식', () => {
-  assert.deepEqual([0, 1, 2, 4, 6, 8].map(radiusFor), [3, 3, 4, 5, 6, 6]);
-  assert.deepEqual([0, 2, 3, 6, 9].map(aiCountFor), [2, 2, 3, 4, 4]);
+test('세계 지도: 175개 나라, 전부 이어지고, 대륙마다 판이 성립한다', async () => {
+  const W = await ensureMap('world');
+  assert.equal(W.key, 'world');
+  assert.ok(W.regions.length >= 170);
+  W.regions.forEach((r, i) => {
+    assert.ok(r.n && r.p && r.prod > 0 && r.tr && r.polys.length, r.n);
+    for (const j of r.adj) assert.ok(W.regions[j].adj.includes(i), `${r.n} ↔ ${W.regions[j].n}`);
+  });
+  const d = bfsDist(0); assert.ok(d.every(x => x >= 0), '전부 이어진다');
+  for (const key of ['asia', 'europe', 'americas', 'africa', 'world']) {
+    const ids = boardIds(key);
+    assert.ok(ids.length >= 7, key);
+    const dd = bfsDist(ids[0], key);
+    for (const id of ids) assert.ok(dd[id] >= 0, `${key}: ${W.regions[id].n} 끊김`);
+    assert.ok(ids.some(i => W.regions[i].n === BOARDS[key].home), `${key} 수도 ${BOARDS[key].home}`);
+  }
+  assert.ok(provinceIds('world').has('아시아'), '대륙이 시·도 자리');
+  setMap(SGG); // 다른 테스트를 위해 되돌린다
 });
 
-test('중립 수비병 공식', () => {
-  assert.equal(neutralGarrison(0, 0), 25);
-  assert.equal(neutralGarrison(3, 0), Math.round(25 * 3.4));
-  assert.equal(neutralGarrison(3, 2), Math.round(25 * 3.4 * 1.3));
+test('세계 판에서 새 판을 만들고 10분 돌려도 정상', async () => {
+  await ensureMap('world');
+  const legacy = { points: 0, prestigeCount: 0, upgrades: {}, difficulty: 'normal' };
+  const s = { legacy, run: newRun(3, legacy, null, 'asia') };
+  assert.equal(MAP.regions[s.run.regions.find(r => r.owner === PLAYER).id].n, '대한민국');
+  assert.ok(s.run.factions - 1 <= maxAiFor('asia'));
+  const before = owned(s, NEUTRAL).length;
+  for (let t = 0; t < 600; t++) { tick(s, 1); runAi(s, 1); }
+  assert.ok(owned(s, NEUTRAL).length < before);
+  assert.equal(s.run.regions.filter(r => r.owner !== OFF).length, boardIds('asia').length);
+  setMap(SGG);
 });
 
-test('새 판: 타일 수, 수도 배치, 시작 자원', () => {
-  const run = generateRun(7, 0, {});
-  assert.equal(run.tiles.length, 37);
-  assert.equal(run.factions, 3);
-  run.tiles.forEach((t, i) => assert.equal(t.id, i));
-  const caps = run.tiles.filter(t => t.owner !== NEUTRAL);
-  assert.equal(caps.length, 3);
-  for (const c of caps) { assert.equal(c.terrain, 'citadel'); assert.equal(c.level, 1); assert.equal(c.soldiers, 30); }
-  const pc = caps.find(t => t.owner === PLAYER);
-  for (const c of caps) if (c !== pc) assert.equal(distance([pc.q, pc.r], [c.q, c.r]), 6);
-  assert.deepEqual(run.gold, [100, 100, 100]);
-  assert.equal(run.sendRatio, 0.5);
-  assert.equal(run.maxTilesOwned, 1);
-});
-
-test('초기 병력 보너스는 플레이어 수도에만', () => {
-  const run = generateRun(7, 0, { startArmy: 2 });
-  const caps = run.tiles.filter(t => t.owner !== NEUTRAL);
-  assert.equal(caps.find(t => t.owner === PLAYER).soldiers, 70);
-  assert.equal(caps.find(t => t.owner === 1).soldiers, 30);
-});
-
-test('같은 시드는 같은 판, 지형은 4종 중 하나', () => {
-  const a = generateRun(99, 0, {}), b = generateRun(99, 0, {});
-  assert.deepEqual(a.tiles, b.tiles);
-  for (const t of a.tiles.filter(t => t.owner === NEUTRAL)) assert.ok(['plain', 'forest', 'hill', 'mountain'].includes(t.terrain));
-  assert.equal(TERRAIN.mountain.def, 1.0);
-});
-
-test('환생 4회면 반지름 5, AI 3', () => {
-  const run = generateRun(1, 4, {});
-  assert.equal(run.tiles.length, 91);
-  assert.equal(run.factions, 4);
-});
-
-test('중립 수비는 가장 가까운 수도 기준: AI 수도 옆 땅도 플레이어 수도 옆 땅과 같다', () => {
-  const run = generateRun(7, 0, {});
-  const caps = run.tiles.filter(t => t.owner !== NEUTRAL);
-  const nearest = c => Math.min(...run.tiles.filter(t => t.owner === NEUTRAL && distance([t.q, t.r], [c.q, c.r]) === 1).map(t => t.soldiers));
-  assert.equal(nearest(caps[0]), neutralGarrison(1, 0));
-  for (const c of caps) assert.equal(nearest(c), nearest(caps[0]));
+test('지도를 바꿔도 대한민국 판은 그대로 돈다', async () => {
+  await ensureMap('world');
+  await ensureMap('sgg');
+  assert.equal(MAP.key, 'sgg');
+  assert.equal(boardIds('all').length, 251);
+  const legacy = { points: 0, prestigeCount: 0, upgrades: {}, difficulty: 'normal' };
+  const s = { legacy, run: newRun(1, legacy, null, 'capital') };
+  assert.equal(boardIds('capital').length, 79);
+  assert.ok(adj(s.run, s.run.regions.find(r => r.owner === PLAYER).id).length > 0);
 });
