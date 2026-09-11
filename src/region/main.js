@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, maxAiFor, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, maxAiFor, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, retreat, canRetreat, RETREAT_LOSS, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi, PERSONAS, personaOf, factionName } from './ai.js';
 import { draw, pickRegion, bounds, centerOf, regionBox } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -59,7 +59,7 @@ function tell(text, id = null, kind = '', ms = 2500) { note(text, id, kind); fla
 
 setListener(e => {
   if (e.type === 'capture') {
-    effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), speed: 1 / 0.7 });
+    effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), speed: 1 / 0.9, flag: true });
     if (e.prevOwner === PLAYER) tell(`💥 ${info(e.id).n}을(를) ${ownerName(e.owner)}에게 빼앗겼습니다`, e.id, 'bad');
     else if (e.owner === PLAYER) tell(`🏳 ${info(e.id).n} 점령! 사단 ${Math.floor(e.remaining)}명 남음`, e.id, 'good');
   }
@@ -68,6 +68,7 @@ setListener(e => {
   if (e.type === 'pact' && (e.a === PLAYER || e.b === PLAYER)) tell(`🤝 ${ownerName(e.a === PLAYER ? e.b : e.a)}와(과) 정전`, null, 'diplo');
   if (e.type === 'betray' && e.victim === PLAYER) tell(`💢 ${ownerName(e.owner)}이(가) 정전을 깨고 쳐들어옵니다!`, null, 'bad', 4000);
   if (e.type === 'research' && e.owner === PLAYER) tell(`🔬 ${TECHS[e.key].icon} ${TECHS[e.key].name} 연구 완료 — ${TECHS[e.key].desc}`, null, 'good', 4000);
+  if (e.type === 'retreat' && e.owner === PLAYER && e.size) effects.push({ id: e.id, t: 0, color: '#ffd479', text: `🏃${e.size}`, speed: 1 / 0.8 });
   if (e.type === 'eliminate') {
     if (e.by === PLAYER) tell(`💀 ${ownerName(e.owner)} 격파! (마지막 지역을 빼앗았습니다)`, e.id, 'good', 4000);
     else if (e.owner !== PLAYER) note(`💀 ${ownerName(e.owner)}이(가) ${ownerName(e.by)}에게 무너졌습니다`, e.id, 'diplo');
@@ -118,6 +119,8 @@ function refresh() {
   setText('p-stats', lines.join('\n'));
   showRow('row-def', mine); showRow('row-div', mine); showRow('row-move', mine && r.div >= 1);
   showRow('row-rebel', !mine && canRebel(state, PLAYER, id));
+  showRow('row-retreat', canRetreat(state, id));
+  updateCoach();
   if (mine) {
     setText('lab-div', r.div >= 1 ? '⚔ 사단 증원' : '⚔ 사단 창설');
     for (const b of document.querySelectorAll('[data-act="def"],[data-act="div"]')) b.disabled = totalPool(state, PLAYER) < 1;
@@ -145,7 +148,12 @@ function onTap(sx, sy) {
 function onAct(act, n) {
   const id = sel !== null ? sel : inspect; if (id === null) return;
   const num = n === 'max' ? 'max' : Number(n);
-  if (act === 'def' || act === 'div') { const a = allocate(state, id, act, num); flashHint(a ? `${act === 'def' ? '🛡 방어' : '⚔ 사단'} +${a} · 남은 인력 ${Math.floor(totalPool(state, PLAYER))}` : '인력이 없어요'); }
+  if (act === 'def' || act === 'div') {
+    const a = allocate(state, id, act, num);
+    if (a) effects.push({ id, t: 0, color: ownerColor(PLAYER), text: `+${a}`, speed: 1 / 0.9 });
+    flashHint(a ? `${act === 'def' ? '🛡 방어' : '⚔ 사단'} +${a} · 남은 인력 ${Math.floor(totalPool(state, PLAYER))}` : '인력이 없어요');
+  }
+  if (act === 'retreat') { const back = retreat(state, id); tell(back ? `🏃 ${info(id).n}에서 ${back}명 퇴각 (${Math.round(RETREAT_LOSS * 100)}% 잃음)` : '물러설 옆 내 땅이 없습니다', id, back ? 'diplo' : 'bad'); }
   if (act === 'rebel') { const a = rebel(state, PLAYER, id, num); flashHint(a ? `✊ ${info(id).n}에 반란 ${a}명 투입 · ${REBEL_DELAY}초 뒤 ${Math.floor(a * REBEL_RATIO)}명 봉기` : '인력이 10명 이상 필요하거나 이미 진행 중'); }
   save(); refresh();
 }
@@ -274,6 +282,39 @@ function openLog() {
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
     onBodyClick: a => { if (a.startsWith('go:')) { const id = Number(a.slice(3)); hideModal(); const r = state.run.regions[id]; if (r.owner === PLAYER) { sel = id; inspect = null; } else { sel = null; inspect = id; } focusOn(id); refresh(); } } });
 }
+// ---- 첫 경험: 처음 들어온 사람에게 작은 판을 권하고, 배치→공격→연구를 차례로 짚어 준다 ----
+const COACH = [
+  { key: 'select', text: '① 내 지역(색칠된 곳)을 탭해 고르세요.', done: () => sel !== null },
+  { key: 'deploy', text: '② ⚔사단 [최대]를 눌러 인력을 사단으로 바꾸세요. (🛡방어는 그 자리를 지키는 인력)', done: () => sel !== null && state.run.regions[sel].div >= 10 },
+  { key: 'attack', text: '③ 이제 옆 지역을 탭하면 그쪽으로 진격합니다. ✓는 이기는 곳, ✕는 지는 곳.', done: () => owned(state, PLAYER).length >= 2 },
+  { key: 'more',   text: '④ 인력이 차면 ⚡배치로 한 번에 넣고, 🔬연구·🤝외교도 써 보세요. 📜기록에 소식이 남습니다.', done: () => owned(state, PLAYER).length >= 4 },
+];
+function coachStep() {
+  if (state.legacy.coached) return null;
+  return COACH.find(c => !c.done()) || null;
+}
+let lastCoach = null;
+function updateCoach() {
+  if (state.legacy.coached) return;
+  const c = coachStep();
+  if ((c && c.key) === lastCoach) return; // 단계가 바뀔 때만 (프레임마다 건드리지 않게)
+  lastCoach = c && c.key;
+  if (!c) { state.legacy.coached = true; save(); setHint(HINT); flashHint('🎉 기본은 다 익혔습니다. ≡ 메뉴에 도움말이 있어요.', 4000); return; }
+  setHint(`🔰 ${c.text}`);
+}
+function openFirstRun() {
+  showModal({ title: '처음 오셨군요', html: `<p>대한민국 시·군·구를 사단으로 먹는 판입니다. <b>방치는 없습니다</b> — 창을 닫으면 시간도 멈춥니다.</p>
+    <p class="sub">첫 판은 <b>수도권</b>(79곳, 10분쯤)을 권합니다. 전국(251곳)은 한 시간짜리예요.</p>
+    ${mapPickerHtml()}`,
+    actions: [
+      { label: '도움말 먼저', onClick: () => { hideModal(); openHelp(); } },
+      { label: '이 판으로 시작', primary: true, onClick: () => { state.legacy.difficulty = pickedDifficulty(); const bd = pickedBoard(), hm = pickedHome(); hideModal(); startNew(Date.now() >>> 0, null, bd, hm); updateCoach(); } },
+    ] });
+  wireBoardPicker();
+  // 첫 판 기본값은 수도권·쉬움 시작지·보통 난이도
+  const b = document.querySelector('input[name="board"][value="capital"]'); if (b) { b.checked = true; b.dispatchEvent(new Event('change')); }
+  const d = document.querySelector('input[name="diff"][value="normal"]'); if (d) d.checked = true;
+}
 function openHelp() {
   showModal({ title: '📖 사단전 도움말', html: `<div class="help">
     <h3>지역과 인력</h3><p>대한민국 251개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 2·시 1.5·군 1/초)이 <b>하나의 인력 풀</b>(상단 👥, 한도 500 + 지역당 2)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려진다(상단에 ⚠넘침). 패널의 ⚡<b>국경 배치</b>를 누르면 인력을 국경 방어 3곳(40%)과 선봉 사단(60%)에 한 번에 넣는다.</p>
@@ -288,6 +329,7 @@ function openHelp() {
     <h3>기록</h3><p>패널의 📜<b>기록</b>에 점령·상실·봉기·배신·격파·연구가 최근 30건까지 남는다. [보기]를 누르면 그 지역으로 간다. 정전 중인 세력 땅에는 흰 점선 테두리가 뜬다.</p>
     <h3>화면</h3><p>한 손가락으로 밀어 이동, 두 손가락으로 확대·축소(많이 들어갈 수 있다), ⌖로 전체 보기. 서울처럼 작은 구는 확대해야 이름이 뜬다. ≡ 메뉴의 🔍<b>지역 찾기</b>에 이름 일부를 넣으면 그 지역으로 바로 옮겨 준다.</p>
     <h3>판</h3><p>전국(251곳) 말고 <b>권역 판</b>(수도권·영남·호남충청, 75~79곳)을 고르면 훨씬 짧게 끝난다. 권역마다 특성 분포가 달라 상성이 다르다. ≡ 메뉴의 "난이도 바꿔 새 판"이나 환생 창에서 고른다.</p>
+    <h3>퇴각</h3><p>전투 중인 지역을 고르면 🏃<b>퇴각</b>이 뜬다. 인원의 ${Math.round(RETREAT_LOSS * 100)}%를 잃고 옆에 붙은 내 땅으로 물러난다(수비 중이면 사단만, 방어인력은 자리를 지킨다). 질 싸움에 병력을 다 갈아 넣지 않아도 된다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
     <h3>환생에 남는 것</h3><p>판이 끝나면 전적에 남고, 조건을 채우면 🎖<b>훈장</b>을 받는다. 환생·정복으로 <b>공적</b>이 쌓여 계급(이등병→대장)이 오르고 계급마다 생산이 는다. 환생할 때마다 <b>장군</b>을 한 명 얻어(같은 장군이면 레벨 +1) 그 판에 앞장세운다 — 돌격(공격)·수성(수비)·기동(행군)·조련(생산) 특기에 레벨당 5%. ≡ 메뉴 🎖전적·계급에서 본다. 유산 상점의 상위 4종(보급술·연구소·사절·통솔)은 환생을 몇 번 해야 열린다.</p>
     <h3>끝</h3><p>251개 다 가지면 정복, 지역·사단·반란이 다 없어지면 전멸 → 환생(유산 포인트 → 상점 영구 보너스, 축복 3택1) 후 새 판. 죽어도 다시 하면 된다.</p>
@@ -404,7 +446,8 @@ function init() {
   });
   window.addEventListener('pagehide', () => save());
   const away = state.lastSave > 0 ? (Date.now() - state.lastSave) / 1000 : 0;
-  if (away > 0) notePause(away); else if (!localStorage.getItem(SAVE_KEY)) openHelp();
+  if (away > 0) notePause(away); else if (!localStorage.getItem(SAVE_KEY)) openFirstRun();
+  updateCoach();
   requestAnimationFrame(loop);
 }
 init();

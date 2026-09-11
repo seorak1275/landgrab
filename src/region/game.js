@@ -464,6 +464,37 @@ export function predict(state, from, to, ratio) {
   return { win: size >= 1 && A > D, A, D };
 }
 
+// ---- 퇴각: 불리한 싸움에서 빼낸다. 인원의 RETREAT_LOSS 만큼 잃고 가장 가까운 내 땅으로 행군 ----
+// (한 번 보내면 전멸까지 싸우던 것을 "지켜볼 만한 일"로 만든다)
+export const RETREAT_LOSS = 0.3;
+export function canRetreat(state, id) {
+  const r = state.run.regions[id];
+  if (!r || !r.battle) return false;
+  if (party(r, PLAYER)) return true;               // 공격 중인 내 부대
+  return r.owner === PLAYER && r.div >= 1;          // 수비 중인 내 사단
+}
+export function retreat(state, id, f = PLAYER) {
+  const run = state.run, r = run.regions[id];
+  if (!r || !r.battle) return 0;
+  // 물러설 곳: 옆에 붙은 내 땅 중 가장 든든한 곳 (없으면 물러설 데가 없다)
+  const home = adj(run, id).filter(n => run.regions[n].owner === f && n !== id)
+    .sort((a, b) => (run.regions[b].def + run.regions[b].div) - (run.regions[a].def + run.regions[a].div))[0];
+  if (home === undefined) return 0;
+  const p = party(r, f);
+  let size = 0;
+  if (p) size = p.size;                                   // 공격 중인 내 부대
+  else if (r.owner === f && r.div >= 1) size = r.div;      // 수비 중인 내 사단 (방어인력은 자리를 지킨다)
+  const back = Math.floor(size * (1 - RETREAT_LOSS));
+  if (back < 1) return 0;
+  if (p) {
+    r.battle.parties = r.battle.parties.filter(x => x !== p);
+    if (!r.battle.parties.length && r.owner !== f) delete r.battle; // 나만 치고 있었다면 전투 끝
+  } else r.div = 0;
+  depart(state, f, back, [id, home]);
+  emit({ type: 'retreat', id, owner: f, size: back, to: home, lost: Math.ceil(size - back) });
+  return back;
+}
+
 // ---- 반란: 남의 지역에 내 풀에서 n명을 보내 REBEL_DELAY초 뒤 REBEL_RATIO만큼 봉기 ----
 export function canRebel(state, f, id) { const r = state.run.regions[id]; return r && r.owner !== f && r.owner !== NEUTRAL && r.owner !== OFF && !state.run.rebels.some(x => x.owner === f && x.target === id); }
 export function rebel(state, f, id, n) {

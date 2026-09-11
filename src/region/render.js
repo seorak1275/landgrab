@@ -143,6 +143,21 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
       }
     }
   }
+  // 5-b. 전투 진행바: 수비 : 공격 전력 비율 (누가 이기고 있는지 한눈에)
+  for (const r of run.regions) {
+    if (!r.battle || !r.battle.parties.length) continue;
+    const i = r.id; if (!visible(i)) continue;
+    const bb = bboxes[i], px = Math.min(bb[2] - bb[0], bb[3] - bb[1]) * SCALE * s;
+    if (px < 22) continue;
+    const [cx, cy] = worldToScreen(cam, W, H, ...centerOf(i));
+    const w = Math.min(72, Math.max(26, px * 0.8)), h = Math.max(3, Math.min(6, px * 0.06));
+    const D = (r.def + r.div) || 0;
+    const parts = [{ owner: r.owner, v: D }, ...r.battle.parties.map(p => ({ owner: p.owner, v: p.size * p.am }))].filter(x => x.v > 0);
+    const tot = parts.reduce((t, x) => t + x.v, 0) || 1;
+    let x = cx - w / 2; const y = cy + fs * 1.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    for (const p of parts) { const seg = w * p.v / tot; ctx.fillStyle = p.owner === NEUTRAL ? '#8a97a3' : ownerColor(p.owner); ctx.fillRect(x, y, seg, h); x += seg; }
+  }
   // 6. 반란 대기: 목표에 ✊ 깜빡임 (주인 색)
   for (const rb of run.rebels) {
     const [cx, cy] = worldToScreen(cam, W, H, ...centerOf(rb.target));
@@ -163,6 +178,12 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
   // 8. 연출: 점령 고리, 봉기 터짐
   for (const e of effects) {
     const [cx, cy] = worldToScreen(cam, W, H, ...centerOf(e.id));
+    if (e.flag) { // 점령: 깃발이 솟아오른다
+      const up = fs * (0.6 + e.t * 2.2);
+      ctx.globalAlpha = 1 - e.t * e.t; ctx.font = `${fs * 1.6}px system-ui, sans-serif`; ctx.textAlign = 'center';
+      ctx.fillStyle = e.color; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.strokeText('🏳', cx, cy - up); ctx.fillText('🏳', cx, cy - up); ctx.globalAlpha = 1;
+    }
     ctx.beginPath(); ctx.arc(cx, cy, fs * (1 + e.t * 3), 0, Math.PI * 2);
     ctx.strokeStyle = e.color; ctx.globalAlpha = 1 - e.t; ctx.lineWidth = 3; ctx.stroke(); ctx.globalAlpha = 1;
     if (e.text) { ctx.font = `bold ${fs * 1.3}px system-ui, sans-serif`; ctx.fillStyle = e.color; ctx.globalAlpha = 1 - e.t * e.t; ctx.strokeText(e.text, cx, cy - fs * (1 + e.t * 2)); ctx.fillText(e.text, cx, cy - fs * (1 + e.t * 2)); ctx.globalAlpha = 1; }
