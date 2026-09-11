@@ -88,3 +88,13 @@ test('저장 기반 난이도 추천: 잘하면 올리고, 계속 지면 내린�
   for (let i = 0; i < 3; i++) addRecord(l3, { mode: 'region', outcome: 'conquered', regions: 251, total: 251, elapsed: 900, difficulty: 'hell', points: 99 });
   assert.equal(recommendDifficulty(l3), 'hell', '맨 위에서는 그대로');
 });
+
+test("훈장 '기사회생'은 판 시작(1곳)만으로 받아지면 안 된다", () => {
+  const legacy = mkLegacy();
+  // 시작하자마자 정복: 한 번도 몰린 적이 없으니 기사회생은 아니다
+  const got = checkMedals(legacy, { mode: 'region', outcome: 'conquered', regions: 79, total: 79, elapsed: 500, difficulty: 'hell', betrayals: 0, killed: 0, lowest: 99 });
+  assert.ok(!got.some(m => m.key === 'comeback'));
+  const l2 = mkLegacy();
+  const got2 = checkMedals(l2, { mode: 'region', outcome: 'conquered', regions: 79, total: 79, elapsed: 500, difficulty: 'hell', betrayals: 0, killed: 0, lowest: 2 });
+  assert.ok(got2.some(m => m.key === 'comeback'));
+});

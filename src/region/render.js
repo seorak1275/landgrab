@@ -16,6 +16,7 @@ const hex = (h, a) => `rgba(${parseInt(h.slice(1, 3), 16)},${parseInt(h.slice(3,
 
 // 화면 좌표 → 지역 id (bbox → 점-다각형)
 const bboxes = MAP.regions.map(r => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of r.polys) for (const [x, y] of p) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; });
+export const regionBox = id => bboxes[id]; // [x0,y0,x1,y1] (지도 단위)
 export function pickRegion(cam, W, H, sx, sy, run = null) {
   const [wx, wy] = screenToWorld(cam, W, H, sx, sy); const x = wx / SCALE, y = wy / SCALE;
   let best = null;
@@ -24,7 +25,16 @@ export function pickRegion(cam, W, H, sx, sy, run = null) {
     const b = bboxes[i]; if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
     for (const p of MAP.regions[i].polys) if (pointInPoly(p, x, y)) { const r = MAP.regions[i]; const d = (r.c[0] - x) ** 2 + (r.c[1] - y) ** 2; if (!best || d < best.d) best = { i, d }; }
   }
-  return best ? best.i : null;
+  if (best) return best.i;
+  // 부산 중구처럼 아주 작은 지역은 손가락으로 정확히 찍기 어렵다 → 24px 안에서 가장 가까운 지역
+  let near = null;
+  for (let i = 0; i < MAP.regions.length; i++) {
+    if (run && run.regions[i].owner === OFF) continue;
+    const [rx, ry] = MAP.regions[i].c;
+    const d = Math.hypot((rx - x) * SCALE * cam.scale, (ry - y) * SCALE * cam.scale);
+    if (d <= 24 && (!near || d < near.d)) near = { i, d };
+  }
+  return near ? near.i : null;
 }
 function tracePolys(ctx, cam, W, H, r) {
   for (const p of r.polys) { p.forEach(([x, y], i) => { const [sx, sy] = worldToScreen(cam, W, H, x * SCALE, y * SCALE); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath(); }
@@ -34,7 +44,14 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
   const run = state.run, s = cam.scale;
   ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#17242f'; ctx.fillRect(0, 0, W, H);
   const [x0, y0] = worldToScreen(cam, W, H, 0, 0), [x1, y1] = worldToScreen(cam, W, H, SCALE, SCALE * MAP.height);
-  const visible = i => { const b = bboxes[i]; const ax = x0 + (x1 - x0) * b[0], ay = y0 + (y1 - y0) * b[1], bx = x0 + (x1 - x0) * b[2], by = y0 + (y1 - y0) * b[3]; return bx > -20 && by > -20 && ax < W + 20 && ay < H + 20; };
+  // 화면 밖 건너뛰기. y는 지도 높이(MAP.height)로 나눠야 한다 — 안 그러면 확대할수록 어긋나
+  // (6% × 지도 전체 높이라 24배에선 2,000px 넘게 틀려서 지역이 통째로 안 그려졌다)
+  const visible = i => {
+    const b = bboxes[i], Hm = MAP.height;
+    const ax = x0 + (x1 - x0) * b[0], bx = x0 + (x1 - x0) * b[2];
+    const ay = y0 + (y1 - y0) * (b[1] / Hm), by = y0 + (y1 - y0) * (b[3] / Hm);
+    return bx > -20 && by > -20 && ax < W + 20 && ay < H + 20;
+  };
   // 1. 채우기
   for (let i = 0; i < MAP.regions.length; i++) {
     if (!visible(i)) continue;
@@ -52,7 +69,7 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
   for (let i = 0; i < MAP.regions.length; i++) {
     if (!visible(i) || run.regions[i].owner === OFF) continue;
     ctx.beginPath(); tracePolys(ctx, cam, W, H, MAP.regions[i]);
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = Math.max(0.6, 0.9 * s); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = Math.max(0.6, Math.min(3, 0.9 * s)); ctx.stroke(); // 많이 확대해도 3px까지만 (안 그러면 경계가 20px 뭉텅이가 된다)
   }
   // 3. 뱃길
   ctx.setLineDash([6, 5]); ctx.strokeStyle = 'rgba(120,200,255,0.55)'; ctx.lineWidth = 1.5;
@@ -64,32 +81,54 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
     if (id === null || id === undefined) continue;
     ctx.beginPath(); tracePolys(ctx, cam, W, H, MAP.regions[id]); ctx.strokeStyle = color; ctx.lineWidth = w; ctx.stroke();
   }
-  // 5. 라벨: 축척에 따라 이름 / 숫자
+  // 5. 라벨: 화면에서 차지하는 크기에 맞춰 이름/숫자, 서로 겹치면 큰 지역이 이긴다
   const fs = Math.max(9, Math.min(16, 7 * s));
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const cands = [];
   for (let i = 0; i < MAP.regions.length; i++) {
     if (!visible(i) || run.regions[i].owner === OFF) continue;
-    const r = run.regions[i], m = MAP.regions[i];
+    const bb = bboxes[i], px = Math.min((bb[2] - bb[0]), (bb[3] - bb[1])) * SCALE * s;
     const [cx, cy] = worldToScreen(cam, W, H, ...centerOf(i));
-    const showName = s >= 1.6 || i === selected || i === inspect;
-    const showNum = s >= 1.0 && (r.owner !== NEUTRAL || s >= 1.6);
-    if (!showName && !showNum) { // 멀리서: 점 하나
-      if (r.owner !== NEUTRAL) { ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fillStyle = ownerColor(r.owner); ctx.fill(); }
-      continue;
-    }
+    cands.push({ i, px, cx, cy, pick: i === selected || i === inspect });
+  }
+  // 선택한 지역 → 화면에서 큰 지역 순으로 자리를 잡는다 (서울처럼 빽빽한 곳에서 글씨가 겹치던 문제)
+  cands.sort((a, b) => (b.pick - a.pick) || (b.px - a.px));
+  const taken = [];
+  const overlaps = (x0, y0, x1, y1) => taken.some(t => x0 < t[2] && x1 > t[0] && y0 < t[3] && y1 > t[1]);
+  for (const c of cands) {
+    const { i, px, cx, cy } = c;
+    const r = run.regions[i], m = MAP.regions[i];
+    // 글씨를 못 넣으면 점이라도 찍는다 (중립은 옅게)
+    const dot = () => { const rad = Math.max(1.5, Math.min(3, px * 0.25)); ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.fillStyle = r.owner === NEUTRAL ? 'rgba(200,215,230,0.5)' : ownerColor(r.owner); ctx.fill(); };
+    let showName = px >= 26 || c.pick;
+    let showNum = px >= 20 && (r.owner !== NEUTRAL || px >= 32);
+    if (!showName && !showNum) { dot(); continue; }
+    const fr = Math.max(8, Math.min(fs, px * 0.36)); // 작은 지역은 글씨도 작게
+    ctx.font = `bold ${fr}px system-ui, sans-serif`;
+    // 이름줄·숫자줄을 따로 잡는다. 자리를 조금 좁게 봐서(0.8) 살짝 스치는 건 허용 — 그래야 서울에서도 이름이 많이 남는다
+    const place = (w, h, x, y) => {
+      const b = [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
+      if (!c.pick && overlaps(...b)) return false;
+      taken.push(b); return true;
+    };
+    const wName = showName ? ctx.measureText(m.n).width * 0.8 : 0;
+    const wNum = showNum ? ctx.measureText(`🛡${Math.floor(r.def)} ⚔${Math.floor(r.div)}`).width * 0.8 : 0;
+    if (showName) showName = place(wName, fr * 0.85, cx, cy - (showNum ? fr * 0.7 : 0));
+    if (showNum) showNum = place(wNum, fr * 0.85, cx, cy + (showName ? fr * 0.6 : 0));
+    if (!showName && !showNum) { dot(); continue; }
     ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-    if (showName) { ctx.font = `bold ${fs}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.strokeText(m.n, cx, cy - (showNum ? fs * 0.7 : 0)); ctx.fillText(m.n, cx, cy - (showNum ? fs * 0.7 : 0)); }
+    if (showName) { ctx.font = `bold ${fr}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.strokeText(m.n, cx, cy - (showNum ? fr * 0.7 : 0)); ctx.fillText(m.n, cx, cy - (showNum ? fr * 0.7 : 0)); }
     if (showNum) {
-      const y = cy + (showName ? fs * 0.6 : 0);
-      ctx.font = `bold ${fs}px system-ui, sans-serif`;
+      const y = cy + (showName ? fr * 0.6 : 0);
+      ctx.font = `bold ${fr}px system-ui, sans-serif`;
       const txt = r.owner === NEUTRAL ? `🛡${Math.floor(r.def)}` : `${r.iso ? '⛓' : ''}🛡${Math.floor(r.def)} ⚔${Math.floor(r.div)}`;
       ctx.fillStyle = '#fff'; ctx.strokeText(txt, cx, y); ctx.fillText(txt, cx, y);
-      if (isColorblind() && r.owner !== NEUTRAL) { ctx.font = `bold ${fs * 0.8}px system-ui, sans-serif`; ctx.fillStyle = ownerColor(r.owner); ctx.strokeText(ownerTag(r.owner), cx + fs * 2.4, cy - fs * 0.7); ctx.fillText(ownerTag(r.owner), cx + fs * 2.4, cy - fs * 0.7); }
+      if (isColorblind() && r.owner !== NEUTRAL) { ctx.font = `bold ${fr * 0.8}px system-ui, sans-serif`; ctx.fillStyle = ownerColor(r.owner); ctx.strokeText(ownerTag(r.owner), cx + fr * 2.4, cy - fr * 0.7); ctx.fillText(ownerTag(r.owner), cx + fr * 2.4, cy - fr * 0.7); }
       if (r.battle && r.battle.parties.length) {
         const lead = r.battle.parties.reduce((a, b) => (b.size * b.am > a.size * a.am ? b : a));
-        ctx.font = `bold ${fs}px system-ui, sans-serif`; ctx.fillStyle = ownerColor(lead.owner);
+        ctx.font = `bold ${fr}px system-ui, sans-serif`; ctx.fillStyle = ownerColor(lead.owner);
         const bl = `⚔${Math.floor(r.battle.parties.reduce((t, p) => t + p.size, 0))}${r.battle.parties.length > 1 ? '난전' : ''}`;
-        ctx.strokeText(bl, cx, y - fs * 1.4); ctx.fillText(bl, cx, y - fs * 1.4);
+        ctx.strokeText(bl, cx, y - fr * 1.4); ctx.fillText(bl, cx, y - fr * 1.4);
       }
     }
   }

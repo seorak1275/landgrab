@@ -42,3 +42,23 @@ test('사단전 저장도 같은 이관을 한다 (v1 → v2)', () => {
   assert.equal(m.legacy.upgrades.offline, undefined);
   assert.equal(rsave.migrate({ version: 99, run: { mode: 'region' }, legacy: {} }), null);
 });
+
+test('예전 사단전 저장(판·기술·관계·수도 없음)도 새 규칙에 맞춰 채워진다', async () => {
+  const g = await import('../src/region/game.js');
+  const s = rsave.newState(11);
+  s.version = 1;
+  delete s.run.board; delete s.run.tech; delete s.run.rel; delete s.run.pacts; delete s.run.capitals;
+  for (const r of s.run.regions) delete r.iso;
+  const m = rsave.migrate(JSON.parse(JSON.stringify(s)));
+  assert.equal(m.run.board, g.DEFAULT_BOARD);
+  assert.equal(m.run.tech.length, m.run.factions);
+  assert.equal(m.run.rel.length, m.run.factions);
+  assert.deepEqual(m.run.pacts, {});
+  assert.equal(m.run.capitals.length, m.run.factions);
+  // 관계가 실제로 움직이고 보급도 다시 계산된다
+  const st = { legacy: m.legacy, run: m.run };
+  g.addRel(st, 0, 1, -20);
+  assert.equal(g.relOf(st, 0, 1), -20);
+  g.tick(st, 1);
+  assert.equal(st.run.regions[m.run.capitals[0]].iso, false);
+});

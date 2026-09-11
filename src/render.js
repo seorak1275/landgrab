@@ -4,10 +4,12 @@ import { MAPS } from './mapgen.js';
 import { regionHolders, battleAttackers, BUILDINGS } from './sim.js';
 
 export const HEX_SIZE = 36;
-// 세력 색. 색약 모드는 Okabe–Ito 팔레트(파랑·주황·노랑·분홍·주홍)로 바꾸고 타일에 주인 글자(나/A1/A2…)를 함께 찍는다
+// 세력 색. 0번은 언제나 **나**, 1번부터가 AI다. AI는 절대 내 색을 쓰지 않는다
+// (색이 5개뿐이라 owner % 5 로 돌던 때는 AI가 6세력이 되면 AI 5가 내 파랑을 그대로 썼다)
+// 색약 모드는 Okabe–Ito 7색 + 타일에 주인 글자(나/A1/A2…)
 const PALETTES = {
-  normal: ['#2f80ed', '#eb5757', '#f2c94c', '#9b51e0', '#27ae60'],
-  cb:     ['#0072B2', '#E69F00', '#F0E442', '#CC79A7', '#D55E00'],
+  normal: ['#2f80ed', '#eb5757', '#f2c94c', '#9b51e0', '#27ae60', '#f2994a', '#e83e8c'],
+  cb:     ['#0072B2', '#E69F00', '#F0E442', '#CC79A7', '#009E73', '#D55E00', '#56B4E9'],
 };
 export const FACTION_COLORS = [...PALETTES.normal];
 export const NEUTRAL_COLOR = '#777';
@@ -37,7 +39,11 @@ export function pickTile(run, cam, W, H, sx, sy) {
   const [q, r] = pixelToHex(wx, wy, HEX_SIZE);
   return run.tiles.find(t => t.q === q && t.r === r) || null;
 }
-export function ownerColor(owner) { return owner === NEUTRAL ? NEUTRAL_COLOR : FACTION_COLORS[owner % FACTION_COLORS.length]; }
+export function ownerColor(owner) {
+  if (owner === NEUTRAL || owner < 0) return NEUTRAL_COLOR;
+  if (owner === 0) return FACTION_COLORS[0]; // 나
+  return FACTION_COLORS[1 + ((owner - 1) % (FACTION_COLORS.length - 1))]; // AI는 내 색을 건너뛴다
+}
 // 타일 전체의 월드 픽셀 경계 [minX, minY, maxX, maxY] (지도 전체 보기용)
 export function worldBounds(run) {
   const b = [Infinity, Infinity, -Infinity, -Infinity];

@@ -1,7 +1,7 @@
 // 사단전 모드 배선 (region.html)
 import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, TECHS, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi } from './ai.js';
-import { draw, pickRegion, bounds, centerOf } from './render.js';
+import { draw, pickRegion, bounds, centerOf, regionBox } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
 import { showModal, hideModal, isModalOpen, attachCanvasInput, formatNum, setHint, flashHint, setRatioButtons, SPEEDS, setSpeedButton } from '../ui.js';
 import { LEGACY_ITEMS, itemCost, buy, itemLocked } from '../prestige.js';
@@ -11,7 +11,7 @@ import { PERKS, offerPerks } from '../perks.js';
 import { GENERALS, GENERAL_SPECS, drawGeneral, setLead, rankOf, addRecord, checkMedals, recommendDifficulty } from '../career.js';
 import { openCareer as openCareerModal, generalPickerHtml, pickedGeneral } from '../career_ui.js';
 
-const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60; // 방치는 없다 — 꺼둔 동안 세상이 멈춘다
+const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60, MAX_ZOOM = 24; // 방치는 없다 — 꺼둔 동안 세상이 멈춘다
 const HINT = '내 지역 탭 → 배치 버튼 / 목적지 탭 → 사단 파병 · 남의 지역 탭 → 반란';
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), ctx = canvas.getContext('2d'), cam = createCamera();
@@ -25,7 +25,22 @@ window.__game = { get state() { return state; }, cam, get sel() { return sel; } 
 
 function resize() { const dpr = window.devicePixelRatio || 1; W = canvas.clientWidth; H = canvas.clientHeight; canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
 function fitAll() { const [x0, y0, x1, y1] = bounds(state); cam.x = (x0 + x1) / 2; cam.y = (y0 + y1) / 2; cam.scale = Math.max(0.3, Math.min(6, Math.min((W - 16) / (x1 - x0), (H - 16) / (y1 - y0)))); }
-function focusOn(id) { const [x, y] = centerOf(id); cam.x = x; cam.y = y; cam.scale = Math.max(cam.scale, 2.2); }
+// 여러 지역(광역시 등)을 한 화면에 담는다
+function focusArea(ids) {
+  if (!ids.length) return;
+  const b = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const id of ids) { const x = regionBox(id); b[0] = Math.min(b[0], x[0]); b[1] = Math.min(b[1], x[1]); b[2] = Math.max(b[2], x[2]); b[3] = Math.max(b[3], x[3]); }
+  cam.x = (b[0] + b[2]) / 2 * 1400; cam.y = (b[1] + b[3]) / 2 * 1400;
+  const w = (b[2] - b[0]) * 1400, h = (b[3] - b[1]) * 1400;
+  cam.scale = Math.max(0.3, Math.min(MAX_ZOOM, Math.min((W - 24) / Math.max(w, 1e-6), (H - 24) / Math.max(h, 1e-6))));
+}
+// 그 지역이 화면에 꽉 차게 (작은 구는 많이, 큰 군은 적게 확대)
+function focusOn(id, fill = 0.5) {
+  const [x, y] = centerOf(id); cam.x = x; cam.y = y;
+  const b = regionBox(id), w = (b[2] - b[0]) * 1400, h = (b[3] - b[1]) * 1400;
+  const want = Math.min(W * fill / Math.max(w, 1e-6), H * fill / Math.max(h, 1e-6));
+  cam.scale = Math.max(cam.scale, Math.min(MAX_ZOOM, Math.max(2.2, want)));
+}
 function hms(sec) { const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60); return h ? `${h}시간 ${m}분` : `${m}분`; }
 function pointsFor(outcome) {
   const k = difficultyOf(state).points * (1 + 0.1 * (state.legacy.upgrades.pointsMul || 0));
@@ -159,6 +174,33 @@ function openDiplo(after = hideModal) {
     actions: [{ label: '닫기', onClick: after, primary: true }],
     onBodyClick: a => { if (a.startsWith('pact:')) { const f = Number(a.slice(5)); const ok = proposePact(state, PLAYER, f); flashHint(ok ? `🤝 ${ownerName(f)}와(과) 정전 ${PACT_DUR}초` : `${ownerName(f)}이(가) 거절했습니다 (내가 앞서거나 사이가 나쁘면 안 받아줍니다)`); save(); openDiplo(after); } } });
 }
+// 🔍 지역 찾기: 251곳 중 이름으로 찾아 그 지역으로 화면을 옮긴다 (서울 구처럼 작은 곳은 눈으로 찾기 어렵다)
+function openFind(q = '') {
+  const list = state.run.regions
+    .filter(r => r.owner !== OFF)
+    .map(r => ({ r, m: info(r.id) }))
+    .filter(({ m }) => !q || (m.n + ' ' + m.p).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (b.r.owner === PLAYER) - (a.r.owner === PLAYER) || (b.r.def + b.r.div) - (a.r.def + a.r.div))
+    .slice(0, 40);
+  const rows = list.map(({ r, m }) => `<div class="shop-row"><span class="name" style="color:${ownerColor(r.owner)}">${m.p} ${m.n}${r.iso ? ' ⛓' : ''}<span class="desc">${ownerName(r.owner)} · 🛡${Math.floor(r.def)} ⚔${Math.floor(r.div)} · ${TRAIT_NAME[m.tr]}</span></span><button data-action="go:${r.id}">보기</button></div>`).join('')
+    || '<p class="sub">그런 이름이 없습니다.</p>';
+  const metros = ['서울', '부산', '대구', '인천', '광주', '대전', '울산'].filter(p => state.run.regions.some(r => r.owner !== OFF && info(r.id).p === p));
+  const metroRow = metros.length ? `<p class="sub">작아서 안 보이는 광역시로 바로 가기</p><p>${metros.map(p => `<button data-action="metro:${p}">${p}</button>`).join(' ')}</p>` : '';
+  showModal({ title: '🔍 지역 찾기', html: `${metroRow}<p class="sub">이름 일부를 넣으면 걸러집니다 (내 지역 → 센 곳 순, 40곳까지)</p>
+    <input id="find-q" type="text" inputmode="search" placeholder="예: 강남, 속초, 경북" value="${q.replace(/"/g, '&quot;')}" style="width:100%;padding:8px;border-radius:8px;border:1px solid #555;background:#1b2430;color:#eee;font-size:15px">
+    ${rows}`,
+    actions: [{ label: '닫기', onClick: hideModal, primary: true }],
+    onBodyClick: a => {
+      if (a.startsWith('metro:')) { const p = a.slice(6); hideModal(); focusArea(state.run.regions.filter(r => r.owner !== OFF && info(r.id).p === p).map(r => r.id)); flashHint(`🔍 ${p} — 두 손가락으로 더 확대할 수 있습니다`); return; }
+      if (!a.startsWith('go:')) return;
+      const id = Number(a.slice(3)); hideModal();
+      const r = state.run.regions[id];
+      if (r.owner === PLAYER) { sel = id; inspect = null; } else { sel = null; inspect = id; }
+      focusOn(id); refresh();
+    } });
+  const el = $('find-q');
+  if (el) { el.addEventListener('input', () => { const v = el.value; openFind(v); const e2 = $('find-q'); if (e2) { e2.focus(); e2.setSelectionRange(v.length, v.length); } }); }
+}
 function openHelp() {
   showModal({ title: '📖 사단전 도움말', html: `<div class="help">
     <h3>지역과 인력</h3><p>대한민국 251개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 2·시 1.5·군 1/초)이 <b>하나의 인력 풀</b>(상단 👥, 한도 500 + 지역당 2)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려진다(상단에 ⚠넘침). 패널의 ⚡<b>국경 배치</b>를 누르면 인력을 국경 방어 3곳(40%)과 선봉 사단(60%)에 한 번에 넣는다.</p>
@@ -168,6 +210,7 @@ function openHelp() {
     <h3>연구</h3><p>패널의 🔬<b>연구</b>로 인력을 들여 그 판 동안 쓸 기술을 산다: ${Object.values(TECHS).map(t => `${t.icon}${t.name}(${t.desc})`).join(' · ')}. 하나 살 때마다 다음 값이 1.6배. AI도 똑같이 연구한다.</p>
     <h3>외교</h3><p>🤝<b>외교</b>로 AI에 <b>정전</b>(${PACT_DUR}초)을 제안한다. 정전 중엔 서로 못 친다. 어기면 관계가 크게 깎이고 다른 세력도 나를 믿지 않는다. AI들은 👑<b>선두를 싫어해</b> 자기들끼리 손을 잡으니, 내가 너무 앞서면 사방에서 몰려온다.</p>
     <h3>보급 (본국 연결)</h3><p>내 <b>본국</b>(수도, 잃으면 생산력이 가장 큰 내 지역)에서 <b>내 지역만 밟아</b> 닿지 않는 지역은 ⛓<b>고립</b>이다. 고립 지역은 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}이고 지도에서 어둡게 보인다. AI도 똑같이 당하니, 크게 뻗은 AI의 <b>허리를 끊으면</b> 뒤쪽 땅이 한꺼번에 약해진다.</p>
+    <h3>화면</h3><p>한 손가락으로 밀어 이동, 두 손가락으로 확대·축소(많이 들어갈 수 있다), ⌖로 전체 보기. 서울처럼 작은 구는 확대해야 이름이 뜬다. ≡ 메뉴의 🔍<b>지역 찾기</b>에 이름 일부를 넣으면 그 지역으로 바로 옮겨 준다.</p>
     <h3>판</h3><p>전국(251곳) 말고 <b>권역 판</b>(수도권·영남·호남충청, 75~79곳)을 고르면 훨씬 짧게 끝난다. 권역마다 특성 분포가 달라 상성이 다르다. ≡ 메뉴의 "난이도 바꿔 새 판"이나 환생 창에서 고른다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
     <h3>환생에 남는 것</h3><p>판이 끝나면 전적에 남고, 조건을 채우면 🎖<b>훈장</b>을 받는다. 환생·정복으로 <b>공적</b>이 쌓여 계급(이등병→대장)이 오르고 계급마다 생산이 는다. 환생할 때마다 <b>장군</b>을 한 명 얻어(같은 장군이면 레벨 +1) 그 판에 앞장세운다 — 돌격(공격)·수성(수비)·기동(행군)·조련(생산) 특기에 레벨당 5%. ≡ 메뉴 🎖전적·계급에서 본다. 유산 상점의 상위 4종(보급술·연구소·사절·통솔)은 환생을 몇 번 해야 열린다.</p>
@@ -176,7 +219,7 @@ function openHelp() {
 }
 function openMenu() {
   showModal({ title: '메뉴 · 사단전', html: `<p>🎖 ${rankOf(state.legacy).name} · 유산 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회 · 난이도 ${difficultyOf(state).name}</p>
-    <p><button data-action="help">📖 도움말</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="restart">난이도 바꿔 새 판</button></p>
+    <p><button data-action="help">📖 도움말</button> <button data-action="find">🔍 지역 찾기</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="restart">난이도 바꿔 새 판</button></p>
     <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드</label></p>
     <p><button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button> <button data-action="reset" style="color:#eb5757">처음부터</button></p>
     <p><a href="index.html" style="color:#6fb1ff">⬡ 육각 모드로 가기</a></p>`,
@@ -185,6 +228,7 @@ function openMenu() {
       if (a === 'help') openHelp();
       if (a === 'shop') openShop(openMenu);
       if (a === 'career') openCareer(openMenu);
+      if (a === 'find') openFind();
       if (a === 'cb') { state.legacy.colorblind = el.checked; setColorblind(el.checked); save(); }
       if (a === 'restart') showModal({ title: '새 판', html: `<p>이번 판을 버리고 새로 시작합니다(유산 유지, 포인트 없음).</p>${mapPickerHtml()}`, actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => { state.legacy.difficulty = pickedDifficulty(); const bd = pickedBoard(); hideModal(); startNew(Date.now() >>> 0, null, bd); } }] });
       if (a === 'export') showModal({ title: '저장 내보내기', html: `<textarea readonly>${JSON.stringify(state)}</textarea>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
@@ -203,7 +247,7 @@ function checkEnd() {
     outcome: st, regions: st === 'conquered' ? total : state.run.maxRegions, total,
     elapsed: Math.round(state.run.elapsed || 0), points: pts,
     betrayals: (state.run.betrayals || {})[PLAYER] || 0, killed: (state.run.kills || {})[PLAYER] || 0,
-    lowest: state.run.lowRegions === undefined ? 0 : state.run.lowRegions,
+    lowest: state.run.lowRegions === undefined ? 99 : state.run.lowRegions, // 몰린 적이 없으면 기사회생 아님
   };
   addRecord(state.legacy, rec);
   const medals = checkMedals(state.legacy, rec);
@@ -262,7 +306,7 @@ function init() {
   $('btn-diplo').addEventListener('click', () => openDiplo());
   $('btn-center').addEventListener('click', fitAll);
   $('btn-speed').addEventListener('click', () => { const i = SPEEDS.indexOf(state.legacy.speed || 1); state.legacy.speed = SPEEDS[(i + 1) % SPEEDS.length]; setSpeedButton(state.legacy.speed); save(); });
-  attachCanvasInput(canvas, cam, { onTap, minScale: 0.3, maxScale: 6 });
+  attachCanvasInput(canvas, cam, { onTap, minScale: 0.3, maxScale: MAX_ZOOM }); // 부산 중구처럼 아주 작은 곳도 들여다볼 수 있게
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { hiddenAt = Date.now(); save(); return; }
     if (hiddenAt) { const e = (Date.now() - hiddenAt) / 1000; hiddenAt = 0; last = performance.now(); acc = 0; if (!isModalOpen()) notePause(e); }

@@ -288,7 +288,13 @@ function battleTick(state, r, dt) {
 }
 export function runBattles(state, dt) { for (const r of state.run.regions) if (r.battle) battleTick(state, r, dt); }
 export function resolveBattle(state, r) { while (r.battle) battleTick(state, r, 1e9); }
-function updateMax(state) { const n = owned(state, PLAYER).length; if (n > state.run.maxRegions) state.run.maxRegions = n; if (state.run.lowRegions === undefined || n < state.run.lowRegions) state.run.lowRegions = n; }
+function updateMax(state) {
+  const n = owned(state, PLAYER).length;
+  if (n > state.run.maxRegions) state.run.maxRegions = n;
+  // '기사회생' 훈장을 위한 최저 지역 수는 **자리를 잡은 뒤부터**(4곳 이상 가져본 뒤) 센다.
+  // 안 그러면 판 시작이 늘 1곳이라 어떤 정복이든 기사회생이 돼 버린다
+  if (state.run.maxRegions > 3 && (state.run.lowRegions === undefined || n < state.run.lowRegions)) state.run.lowRegions = n;
+}
 
 // ---- 행군 ----
 function depart(state, owner, size, path) { const a = { owner, size, am: attackMul(state, owner), path, pos: 0, speed: speedOf(state, owner) }; state.run.armies.push(a); return a; }

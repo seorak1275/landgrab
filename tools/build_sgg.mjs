@@ -4,7 +4,11 @@
 // - 생산력(prod, 인력/초)과 특성(trait)은 유형·시도로 정한다
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
-const SRC = 'https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2013/json/skorea_municipalities_geo_simple.json';
+// 고해상도 원본(지역당 평균 4,890점). _simple 판(평균 34점)으로 만들었더니 서울 구가 꼭짓점 7개짜리
+// 삼각형이라 확대하면 깨져 보였다 → 원본을 받아 우리가 직접, 지역 크기에 맞춰 단순화한다
+const SRC = 'https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2013/json/skorea_municipalities_geo.json';
+const SRC_FILE = 'tools/geo/sgg_full.json';
+const TOL_K = Number(process.env.TOL_K || 0.006), TOL_MIN = Number(process.env.TOL_MIN || 0.00004), TOL_MAX = Number(process.env.TOL_MAX || 0.00025);
 const PROV = { 11: '서울', 21: '부산', 22: '대구', 23: '인천', 24: '광주', 25: '대전', 26: '울산', 29: '세종', 31: '경기', 32: '강원', 33: '충북', 34: '충남', 35: '전북', 36: '전남', 37: '경북', 38: '경남', 39: '제주' };
 const METRO = new Set([11, 21, 22, 23, 24, 25, 26, 29]);
 const MOUNTAIN_PROV = new Set(['강원', '경북', '충북']);
@@ -14,7 +18,7 @@ const PROD = { 구: 2, 시: 1.5, 군: 1 };
 
 async function fetchGeo() {
   mkdirSync('tools/geo', { recursive: true });
-  const f = 'tools/geo/sgg.json';
+  const f = SRC_FILE;
   if (!existsSync(f)) writeFileSync(f, await (await fetch(SRC)).text());
   return JSON.parse(readFileSync(f, 'utf8'));
 }
@@ -34,9 +38,18 @@ function simplify(pts, tol) {
 
 const geo = await fetchGeo();
 // 투영 (경도는 cos(위도)로 줄임, 위도는 위로 갈수록 y 작게), 폭 1
-let lons = [], lats = [];
-for (const ft of geo.features) for (const pg of (ft.geometry.type === 'Polygon' ? [ft.geometry.coordinates] : ft.geometry.coordinates)) for (const [x, y] of pg[0]) { lons.push(x); lats.push(y); }
-const lon0 = Math.min(...lons), lon1 = Math.max(...lons), lat0 = Math.min(...lats), lat1 = Math.max(...lats);
+// 고해상도 원본은 점이 120만 개라 Math.min(...arr) 은 스택이 터진다 → 훑으면서 최소·최대.
+// 독도·백령도 같은 아주 작은 섬(2km 미만)은 어차피 출력에서 버리니 범위 계산에서도 뺀다
+// (넣으면 지도 폭이 13% 늘어 본토가 그만큼 작게 그려진다)
+const ISLET = 0.02; // 도(度)
+let lon0 = Infinity, lon1 = -Infinity, lat0 = Infinity, lat1 = -Infinity;
+for (const ft of geo.features) for (const pg of (ft.geometry.type === 'Polygon' ? [ft.geometry.coordinates] : ft.geometry.coordinates)) {
+  const ring = pg[0];
+  let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+  for (const [x, y] of ring) { if (x < a0) a0 = x; if (x > a1) a1 = x; if (y < b0) b0 = y; if (y > b1) b1 = y; }
+  if (a1 - a0 < ISLET && b1 - b0 < ISLET) continue;
+  if (a0 < lon0) lon0 = a0; if (a1 > lon1) lon1 = a1; if (b0 < lat0) lat0 = b0; if (b1 > lat1) lat1 = b1;
+}
 const k = Math.cos((lat0 + lat1) / 2 * Math.PI / 180), W = (lon1 - lon0) * k, H = (lat1 - lat0) / W;
 const proj = ([x, y]) => [(x - lon0) * k / W, (lat1 - y) / W];
 
@@ -99,7 +112,12 @@ const out = {
   key: 'sgg', name: '대한민국 시·군·구', width: 1, height: +H.toFixed(4),
   regions: regions.map((r, i) => ({
     n: r.label, p: r.prov, t: r.type, c: r.c, prod: r.prod, tr: r.trait, adj: adj[i],
-    polys: r.rings.filter(ring => Math.abs(ringArea(ring)) >= 0.00002 || ring === r.rings[0]).map(ring => simplify(ring, 0.0012).map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)])),
+    // 허용오차는 지역 크기에 맞춘다: 작은 구(서울·부산)는 곱게, 큰 군은 굵게.
+    // 0.0012 한 값으로 뭉개던 때는 서울 구가 꼭짓점 7개짜리 삼각형이라 확대하면 깨져 보였다
+    polys: r.rings.filter(ring => Math.abs(ringArea(ring)) >= 0.00002 || ring === r.rings[0]).map(ring => {
+      const tol = Math.max(TOL_MIN, Math.min(TOL_MAX, TOL_K * Math.sqrt(Math.abs(ringArea(ring)))));
+      return simplify(ring, tol).map(([x, y]) => [+x.toFixed(5), +y.toFixed(5)]);
+    }),
   })),
   sea,
 };
