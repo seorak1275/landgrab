@@ -40,7 +40,7 @@ function tracePolys(ctx, cam, W, H, r) {
   for (const p of r.polys) { p.forEach(([x, y], i) => { const [sx, sy] = worldToScreen(cam, W, H, x * SCALE, y * SCALE); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); }); ctx.closePath(); }
 }
 
-export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, effects = [], marks = {} } = {}) {
+export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, effects = [], marks = {}, peace = null } = {}) {
   const run = state.run, s = cam.scale;
   ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#17242f'; ctx.fillRect(0, 0, W, H);
   const [x0, y0] = worldToScreen(cam, W, H, 0, 0), [x1, y1] = worldToScreen(cam, W, H, SCALE, SCALE * MAP.height);
@@ -60,6 +60,7 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
     ctx.beginPath(); tracePolys(ctx, cam, W, H, MAP.regions[i]);
     ctx.fillStyle = r.owner === NEUTRAL ? '#3a4a58' : hex(ownerColor(r.owner), 0.6); ctx.fill();
     if (r.iso) { ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fill(); } // 고립(본국과 끊김)은 어둡게
+    if (peace && peace.has(r.owner)) { ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]); } // 🤝 정전 중인 세력
     const mark = marks[i];
     if (mark) { ctx.fillStyle = mark === 'win' ? 'rgba(111,227,143,0.35)' : mark === 'lose' ? 'rgba(255,123,123,0.35)' : 'rgba(255,255,255,0.18)'; ctx.fill(); }
     if (r.battle) { ctx.fillStyle = `rgba(255,255,255,${0.15 + 0.15 * Math.sin(Date.now() / 120)})`; ctx.fill(); }
@@ -99,7 +100,13 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
     const { i, px, cx, cy } = c;
     const r = run.regions[i], m = MAP.regions[i];
     // 글씨를 못 넣으면 점이라도 찍는다 (중립은 옅게)
-    const dot = () => { const rad = Math.max(1.5, Math.min(3, px * 0.25)); ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.fillStyle = r.owner === NEUTRAL ? 'rgba(200,215,230,0.5)' : ownerColor(r.owner); ctx.fill(); };
+    // 글씨를 못 넣으면 점: 주인 있는 곳은 늘, 중립은 어느 정도 커 보일 때만 (전체 보기에서 온 지도가 점으로 뒤덮이지 않게)
+    const dot = () => {
+      if (r.owner === NEUTRAL) return; // 중립까지 점을 찍으면 전체 보기가 점밭이 된다
+      const rad = Math.max(1.5, Math.min(3, px * 0.25));
+      ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fillStyle = r.owner === NEUTRAL ? 'rgba(200,215,230,0.4)' : ownerColor(r.owner); ctx.fill();
+    };
     let showName = px >= 26 || c.pick;
     let showNum = px >= 20 && (r.owner !== NEUTRAL || px >= 32);
     if (!showName && !showNum) { dot(); continue; }

@@ -337,9 +337,44 @@ export function move(state, from, to, ratio) {
   const path = [from, to];
   f.div -= size;
   const a = depart(state, f.owner, size, path);
-  const res = { type: t.owner === f.owner ? 'move' : 'attack', size, from, to, owner: f.owner, eta: (path.length - 1) / a.speed };
+  const res = { type: t.owner === f.owner ? 'move' : 'attack', size, from, to, owner: f.owner, hops: 1, eta: (path.length - 1) / a.speed };
   emit(res); return res;
 }
+// 내 땅만 밟아 to 까지 가는 최단 경로 (to 는 내 땅이거나 내 땅에 붙어 있어야 한다).
+// 이동 규칙은 그대로 "한 칸씩" — 다만 손으로 수십 번 누르는 대신 이어서 진격한다. 먼 적지는 여전히 반란으로만
+export function pathThroughMine(run, from, to) {
+  const f = run.regions[from], t = run.regions[to];
+  if (!f || !t || from === to || f.owner === NEUTRAL || f.owner === OFF || t.owner === OFF) return null;
+  const owner = f.owner;
+  if (t.owner === owner) { // 내 땅끼리: 내 땅만 밟아 간다
+    const parent = bfsOwn(run, from);
+    return parent.has(to) ? pathTo(parent, to) : null;
+  }
+  // 남의 땅·중립: 그 곳에 붙은 내 땅까지 간 다음 마지막 한 칸
+  const parent = bfsOwn(run, from);
+  let best = null;
+  for (const n of adj(run, to)) {
+    if (!parent.has(n)) continue;
+    const p = pathTo(parent, n);
+    if (!best || p.length < best.length) best = p;
+  }
+  return best ? [...best, to] : null;
+}
+// 자동 진격: 이어진 내 땅을 따라 여러 칸을 한 번에 보낸다 (가는 길이 끊기면 거기서 싸운다 — runArmies 규칙 그대로)
+export function moveFar(state, from, to, ratio) {
+  const run = state.run;
+  const path = pathThroughMine(run, from, to);
+  if (!path) return move(state, from, to, ratio); // 이어지지 않았으면 인접 이동 규칙대로 (대개 invalid)
+  if (path.length === 2) return move(state, from, to, ratio);
+  const f = run.regions[from], t = run.regions[to];
+  const size = Math.floor(f.div * ratio); if (size < 1) return { type: 'invalid' };
+  if (t.owner !== f.owner && t.owner !== NEUTRAL) breakPact(state, f.owner, t.owner);
+  f.div -= size;
+  const a = depart(state, f.owner, size, path);
+  const res = { type: t.owner === f.owner ? 'move' : 'attack', size, from, to, owner: f.owner, hops: path.length - 1, eta: (path.length - 1) / a.speed };
+  emit(res); return res;
+}
+
 export function predict(state, from, to, ratio) {
   const run = state.run, f = run.regions[from], t = run.regions[to];
   const size = Math.floor(f.div * ratio), am = attackMul(state, f.owner), mine = party(t, f.owner);

@@ -121,7 +121,7 @@ function showWelcome(then) {
 function mapPickerHtml(current) {
   const maps = Object.values(MAPS).map(m => `<label class="map-row"><input type="radio" name="map" value="${m.key}" ${m.key === current ? 'checked' : ''}> <b>${m.name}</b><span class="desc">${m.desc}${m.homeName ? ` · 내 수도 ${m.homeName}` : ''}</span></label>`).join('');
   const cur = state.legacy.difficulty || DEFAULT_DIFFICULTY;
-  const rec = recommendDifficulty(state.legacy, 'hex');
+  const rec = recommendDifficulty(state.legacy, 'hex', state.run.map);
   const diffs = Object.entries(DIFFICULTIES).map(([k, d]) => `<label class="diff-row"><input type="radio" name="diff" value="${k}" ${k === cur ? 'checked' : ''}> ${d.name}${k === rec ? ' ★ 추천' : ''} <span class="desc">AI 생산 ×${d.mul} · 유산 ×${d.points}</span></label>`).join('');
   return `${maps}<p class="sub">난이도 (AI는 10분마다 +0.1씩 더 세집니다${rec !== cur ? ' · ★는 지난 판 성적으로 뽑은 추천' : ''})</p>${diffs}`;
 }
@@ -178,7 +178,7 @@ function openMenu() {
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
     onBodyClick: (a, el) => {
       if (a === 'shop') openShop();
-      if (a === 'career') openCareerModal({ state, save, after: openMenu, mode: 'hex' });
+      if (a === 'career') openCareerModal({ state, save, after: openMenu, mode: 'hex', canChangeLead: () => (state.run.elapsed || 0) < 120 || !state.legacy.lead });
       if (a === 'map') openMapChange();
       if (a === 'help') openHelp();
       if (a === 'cb') { state.legacy.colorblind = el.checked; setColorblind(el.checked); save(state); refresh(); }

@@ -107,11 +107,12 @@ export function bestRecord(legacy, mode = null) {
 }
 
 // ---- 저장 기반 추천 난이도: 최근 3판이 다 정복이면 한 칸 위, 2판 이상 전멸이면 한 칸 아래 ----
-export function recommendDifficulty(legacy, mode = null) {
+// board 를 주면 그 판(전국/수도권/…)의 기록만 본다 — 수도권 3연승으로 전국 지옥을 권하면 안 되니까
+export function recommendDifficulty(legacy, mode = null, board = null) {
   const keys = Object.keys(DIFFICULTIES);
   const cur = legacy.difficulty || DEFAULT_DIFFICULTY;
   const i = Math.max(0, keys.indexOf(cur));
-  const rs = records(legacy).filter(r => !mode || r.mode === mode).slice(0, 3);
+  const rs = records(legacy).filter(r => (!mode || r.mode === mode) && (!board || r.board === board)).slice(0, 3);
   if (rs.length < 3) return cur;
   const won = rs.filter(r => r.outcome === 'conquered').length;
   const lost = rs.filter(r => r.outcome === 'wiped').length;

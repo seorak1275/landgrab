@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, TECHS, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi } from './ai.js';
 import { draw, pickRegion, bounds, centerOf, regionBox } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -47,13 +47,31 @@ function pointsFor(outcome) {
   return outcome === 'conquered' ? Math.floor((10 + Math.floor(activeCount(state) / 4)) * k) : Math.max(1, Math.floor(state.run.maxRegions / 4 * k));
 }
 
+const LOG_MAX = 30;
+function logs() { if (!state.run.log) state.run.log = []; return state.run.log; }
+function note(text, id = null, kind = '') {
+  const L = logs();
+  L.unshift({ t: Math.round(state.run.elapsed || 0), text, id, kind });
+  if (L.length > LOG_MAX) L.length = LOG_MAX;
+}
+// 알림 + 기록을 한 번에 (놓쳐도 📜에 남는다)
+function tell(text, id = null, kind = '', ms = 2500) { note(text, id, kind); flashHint(text, ms); }
+
 setListener(e => {
-  if (e.type === 'capture') { effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), speed: 1 / 0.7 }); if (e.prevOwner === PLAYER) flashHint(`${info(e.id).n}을(를) ${ownerName(e.owner)}에게 빼앗겼습니다`); if (e.owner === PLAYER) flashHint(`🏳 ${info(e.id).n} 점령! 사단 ${Math.floor(e.remaining)}명 남음`); }
-  if (e.type === 'uprising') { effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), text: '✊봉기', speed: 1 / 1 }); if (state.run.regions[e.id].owner === PLAYER) flashHint(`✊ ${info(e.id).n}에서 ${ownerName(e.owner)}의 반란군 ${e.size}명 봉기!`, 3000); }
-  if (e.type === 'repel' && e.owner === PLAYER) flashHint(`공격 실패 · ${info(e.id).n}`);
-  if (e.type === 'pact' && (e.a === PLAYER || e.b === PLAYER)) flashHint(`🤝 ${ownerName(e.a === PLAYER ? e.b : e.a)}와(과) 정전 ${PACT_DUR}초`);
-  if (e.type === 'betray' && e.victim === PLAYER) flashHint(`💢 ${ownerName(e.owner)}이(가) 정전을 깨고 쳐들어옵니다!`, 4000);
-  if (e.type === 'research' && e.owner === PLAYER) flashHint(`🔬 ${TECHS[e.key].icon} ${TECHS[e.key].name} 연구 완료 — ${TECHS[e.key].desc}`, 4000);
+  if (e.type === 'capture') {
+    effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), speed: 1 / 0.7 });
+    if (e.prevOwner === PLAYER) tell(`💥 ${info(e.id).n}을(를) ${ownerName(e.owner)}에게 빼앗겼습니다`, e.id, 'bad');
+    else if (e.owner === PLAYER) tell(`🏳 ${info(e.id).n} 점령! 사단 ${Math.floor(e.remaining)}명 남음`, e.id, 'good');
+  }
+  if (e.type === 'uprising') { effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), text: '✊봉기', speed: 1 / 1 }); if (state.run.regions[e.id].owner === PLAYER) tell(`✊ ${info(e.id).n}에서 ${ownerName(e.owner)}의 반란군 ${e.size}명 봉기!`, e.id, 'bad', 3000); }
+  if (e.type === 'repel' && e.owner === PLAYER) tell(`✕ 공격 실패 · ${info(e.id).n}`, e.id, 'bad');
+  if (e.type === 'pact' && (e.a === PLAYER || e.b === PLAYER)) tell(`🤝 ${ownerName(e.a === PLAYER ? e.b : e.a)}와(과) 정전`, null, 'diplo');
+  if (e.type === 'betray' && e.victim === PLAYER) tell(`💢 ${ownerName(e.owner)}이(가) 정전을 깨고 쳐들어옵니다!`, null, 'bad', 4000);
+  if (e.type === 'research' && e.owner === PLAYER) tell(`🔬 ${TECHS[e.key].icon} ${TECHS[e.key].name} 연구 완료 — ${TECHS[e.key].desc}`, null, 'good', 4000);
+  if (e.type === 'eliminate') {
+    if (e.by === PLAYER) tell(`💀 ${ownerName(e.owner)} 격파! (마지막 지역을 빼앗았습니다)`, e.id, 'good', 4000);
+    else if (e.owner !== PLAYER) note(`💀 ${ownerName(e.owner)}이(가) ${ownerName(e.by)}에게 무너졌습니다`, e.id, 'diplo');
+  }
 });
 
 // ---- 패널 ----
@@ -67,9 +85,10 @@ function refresh() {
   $('top-pool').style.color = full ? '#ffd479' : '';
   setText('top-regions', `🏳 ${owned(state, PLAYER).length}/${activeCount(state)}`);
   setText('top-prestige', `환생 ${state.legacy.prestigeCount}`);
-  setText('btn-tech', `🔬 연구 ${techCount(state.run, PLAYER)}/${Object.keys(TECHS).length}`);
+  setText('btn-tech', `🔬 ${techCount(state.run, PLAYER)}/${Object.keys(TECHS).length}`);
   const pacts = []; for (let f = 1; f < state.run.factions; f++) if (atPeace(state, PLAYER, f)) pacts.push(f);
-  setText('btn-diplo', pacts.length ? `🤝 정전 ${pacts.length}` : '🤝 외교');
+  setText('btn-diplo', pacts.length ? `🤝 ${pacts.length}` : '🤝 외교');
+  setText('btn-log', logs().length ? `📜 ${logs().length}` : '📜 기록');
   setText('top-points', `✨ ${state.legacy.points}`);
   const id = sel !== null ? sel : inspect;
   if (id === null) {
@@ -104,10 +123,13 @@ function onTap(sx, sy) {
   const id = pickRegion(cam, W, H, sx, sy, state.run);
   if (id === null) { sel = null; inspect = null; refresh(); return; }
   const r = state.run.regions[id];
-  if (sel !== null && id !== sel) { // 파병
-    const res = move(state, sel, id, state.run.sendRatio);
-    if (res.type === 'invalid') { if (r.owner === PLAYER) { sel = id; inspect = null; } else { flashHint('사단이 없거나 인접하지 않아요 (인접한 지역으로만 이동, 먼 곳은 반란으로)'); inspect = id; sel = null; } }
-    else flashHint(res.type === 'attack' ? `⚔ 출격 ${res.size}명 → ${info(id).n} · 약 ${res.eta.toFixed(0)}초` : `→ 이동 ${res.size}명 → ${info(id).n} · 약 ${res.eta.toFixed(0)}초`);
+  if (sel !== null && id !== sel) { // 파병 (이어진 내 땅이 있으면 여러 칸을 자동으로 진격한다)
+    const res = moveFar(state, sel, id, state.run.sendRatio);
+    if (res.type === 'invalid') { if (r.owner === PLAYER) { sel = id; inspect = null; } else { flashHint('사단이 없거나, 내 땅으로 이어지지 않은 곳이에요 (먼 적지는 ✊반란으로)'); inspect = id; sel = null; } }
+    else {
+      const hop = res.hops > 1 ? ` · ${res.hops}칸 진격` : '';
+      flashHint(`${res.type === 'attack' ? '⚔ 출격' : '→ 이동'} ${res.size}명 → ${info(id).n}${hop} · 약 ${res.eta.toFixed(0)}초`);
+    }
     refresh(); return;
   }
   if (r.owner === PLAYER) { sel = id; inspect = null; } else { sel = null; inspect = id; }
@@ -124,7 +146,8 @@ function onAct(act, n) {
 // ---- 창 ----
 function mapPickerHtml() {
   const cur = state.legacy.difficulty || DEFAULT_DIFFICULTY;
-  const rec = recommendDifficulty(state.legacy, 'region');
+  const bd = state.legacy.boardPref || state.run.board || DEFAULT_BOARD;
+  const rec = recommendDifficulty(state.legacy, 'region', bd);
   return boardPickerHtml() + `<p class="sub">난이도 (AI는 10분마다 +0.1씩 더 세집니다${rec !== cur ? ' · ★는 지난 판 성적으로 뽑은 추천' : ''})</p>` + Object.entries(DIFFICULTIES).map(([k, d]) => `<label class="diff-row"><input type="radio" name="diff" value="${k}" ${k === cur ? 'checked' : ''}> ${d.name}${k === rec ? ' ★ 추천' : ''} <span class="desc">AI 생산 ×${d.mul} · 유산 ×${d.points}</span></label>`).join('');
 }
 const pickedDifficulty = () => { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : state.legacy.difficulty; };
@@ -135,7 +158,7 @@ function boardPickerHtml() {
 const pickedBoard = () => { const el = document.querySelector('input[name="board"]:checked'); return el ? el.value : (state.legacy.boardPref || DEFAULT_BOARD); };
 const pickedPerk = () => { const el = document.querySelector('input[name="perk"]:checked'); return el ? el.value : null; };
 function perkPickerHtml(seed) { return `<p class="sub">이번 판 축복 (하나 선택)</p><div class="perk-row">${offerPerks(seed).map((k, i) => `<label><input type="radio" name="perk" value="${k}" ${i === 0 ? 'checked' : ''}><b>${PERKS[k].icon} ${PERKS[k].name}</b><span class="desc">${PERKS[k].desc}</span></label>`).join('')}</div>`; }
-function openCareer(after = hideModal) { openCareerModal({ state, save: () => save(), after, mode: 'region', boardName: k => (BOARDS[k] || {}).name }); }
+function openCareer(after = hideModal) { openCareerModal({ state, save: () => save(), after, mode: 'region', boardName: k => (BOARDS[k] || {}).name, canChangeLead: () => truce(state) || !state.legacy.lead }); }
 function startNew(seed, perk, board = state.legacy.boardPref || DEFAULT_BOARD) { state.legacy.boardPref = board; state.run = newRun(seed, state.legacy, perk, board); sel = null; inspect = null; ended = false; effects = []; fitAll(); focusOn(state.run.regions.findIndex(r => r.owner === PLAYER)); save(); refresh(); }
 function openShop(after = hideModal) {
   const rows = Object.entries(LEGACY_ITEMS).map(([k, it]) => {
@@ -162,10 +185,13 @@ function openDiplo(after = hideModal) {
   for (let f = 1; f < state.run.factions; f++) {
     const n = owned(state, f).length, rel = relOf(state, PLAYER, f), peace = atPeace(state, PLAYER, f);
     const cool = Math.ceil(refusedLeft(state, PLAYER, f));
-    const btn = peace ? `<button disabled>정전 ${Math.ceil(pactLeft(state, PLAYER, f))}초</button>`
+    const alive = n > 0 || state.run.armies.some(a => a.owner === f) || state.run.rebels.some(r => r.owner === f);
+    const techs = Object.keys(techsOf(state.run, f)).map(k => `${TECHS[k].icon}${TECHS[k].name}`).join(' ');
+    const btn = !alive ? '<button disabled>💀 격파됨</button>'
+      : peace ? `<button disabled>정전 ${Math.ceil(pactLeft(state, PLAYER, f))}초</button>`
       : cool > 0 ? `<button disabled>거절 ${cool}초</button>`
       : `<button data-action="pact:${f}">정전 제안</button>`;
-    rows.push(`<div class="shop-row"><span class="name" style="color:${ownerColor(f)}">${ownerName(f)}${f === lead ? ' 👑' : ''} <b>${n}곳</b><span class="desc">관계 ${rel > 0 ? '+' : ''}${Math.round(rel)} (${relWord(rel)})${peace ? ' · 🤝 정전 중' : ''}</span></span>${btn}</div>`);
+    rows.push(`<div class="shop-row"><span class="name" style="color:${ownerColor(f)};opacity:${alive ? 1 : 0.45}">${ownerName(f)}${f === lead && alive ? ' 👑' : ''} <b>${n}곳</b><span class="desc">${alive ? `관계 ${rel > 0 ? '+' : ''}${Math.round(rel)} (${relWord(rel)})${peace ? ' · 🤝 정전 중' : ''}` : '무너진 세력'}${techs ? ` · 기술 ${techs}` : ''}</span></span>${btn}</div>`);
   }
   const others = [];
   for (let a = 1; a < state.run.factions; a++) for (let b = a + 1; b < state.run.factions; b++) if (atPeace(state, a, b)) others.push(`${ownerName(a)}–${ownerName(b)}`);
@@ -201,15 +227,24 @@ function openFind(q = '') {
   const el = $('find-q');
   if (el) { el.addEventListener('input', () => { const v = el.value; openFind(v); const e2 = $('find-q'); if (e2) { e2.focus(); e2.setSelectionRange(v.length, v.length); } }); }
 }
+function openLog() {
+  const L = logs();
+  const rows = L.map((x, i) => `<div class="shop-row"><span class="name" style="color:${x.kind === 'bad' ? '#ff9c9c' : x.kind === 'good' ? '#9ae6b4' : '#ddd'}">${x.text}<span class="desc">${hms(x.t)}째</span></span>${x.id !== null && x.id !== undefined ? `<button data-action="go:${x.id}">보기</button>` : ''}</div>`).join('')
+    || '<p class="sub">아직 아무 일도 없었습니다.</p>';
+  showModal({ title: `📜 기록 (최근 ${L.length}건)`, html: `<p class="sub">놓친 소식을 여기서 봅니다. [보기]를 누르면 그 지역으로 갑니다.</p>${rows}`,
+    actions: [{ label: '닫기', onClick: hideModal, primary: true }],
+    onBodyClick: a => { if (a.startsWith('go:')) { const id = Number(a.slice(3)); hideModal(); const r = state.run.regions[id]; if (r.owner === PLAYER) { sel = id; inspect = null; } else { sel = null; inspect = id; } focusOn(id); refresh(); } } });
+}
 function openHelp() {
   showModal({ title: '📖 사단전 도움말', html: `<div class="help">
     <h3>지역과 인력</h3><p>대한민국 251개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 2·시 1.5·군 1/초)이 <b>하나의 인력 풀</b>(상단 👥, 한도 500 + 지역당 2)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려진다(상단에 ⚠넘침). 패널의 ⚡<b>국경 배치</b>를 누르면 인력을 국경 방어 3곳(40%)과 선봉 사단(60%)에 한 번에 넣는다.</p>
     <h3>방어 배치 · 사단</h3><p>풀에서 🛡<b>방어인력</b>(그 지역 고정 수비)이나 ⚔<b>사단</b>(움직이는 부대, 지역당 하나, 인원 무제한)으로 옮긴다. +10/+100/+500/최대.</p>
-    <h3>파병</h3><p>내 지역 선택 → <b>인접한</b> 지역 탭. 파병 비율(25/50/100%)만큼 사단이 행군(2초)해 내 지역이면 합류, 남의 지역이면 전투. 선택하면 인접 지역이 밝아진다(✓이김/✕짐). 먼 곳은 반란으로.</p>
+    <h3>파병 · 자동 진격</h3><p>내 지역 선택 → 목적지 탭. 사단은 한 칸 2초로 <b>한 칸씩</b> 행군하지만, 목적지가 <b>이어진 내 땅</b> 너머라면 그 길을 따라 <b>자동으로 계속 진격</b>한다(몇 칸인지·몇 초 걸리는지 알려 준다). 가는 길의 내 땅을 그새 빼앗기면 거기서 싸운다. 선택하면 갈 수 있는 곳이 밝아진다(✓이김/✕짐). 내 땅과 이어지지 않은 <b>먼 적지는 여전히 ✊반란으로만</b>.</p>
     <h3>반란</h3><p>남이 가진 지역을 탭 → ✊반란 10/100/500/최대. 내 모든 풀에서 빠지고 10초 뒤 70%가 그 지역 안에서 봉기해 방어+사단과 싸운다. 인접할 필요 없음. AI도 똑같이 한다.</p>
     <h3>연구</h3><p>패널의 🔬<b>연구</b>로 인력을 들여 그 판 동안 쓸 기술을 산다: ${Object.values(TECHS).map(t => `${t.icon}${t.name}(${t.desc})`).join(' · ')}. 하나 살 때마다 다음 값이 1.6배. AI도 똑같이 연구한다.</p>
     <h3>외교</h3><p>🤝<b>외교</b>로 AI에 <b>정전</b>(${PACT_DUR}초)을 제안한다. 정전 중엔 서로 못 친다. 어기면 관계가 크게 깎이고 다른 세력도 나를 믿지 않는다. AI들은 👑<b>선두를 싫어해</b> 자기들끼리 손을 잡으니, 내가 너무 앞서면 사방에서 몰려온다.</p>
     <h3>보급 (본국 연결)</h3><p>내 <b>본국</b>(수도, 잃으면 생산력이 가장 큰 내 지역)에서 <b>내 지역만 밟아</b> 닿지 않는 지역은 ⛓<b>고립</b>이다. 고립 지역은 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}이고 지도에서 어둡게 보인다. AI도 똑같이 당하니, 크게 뻗은 AI의 <b>허리를 끊으면</b> 뒤쪽 땅이 한꺼번에 약해진다.</p>
+    <h3>기록</h3><p>패널의 📜<b>기록</b>에 점령·상실·봉기·배신·격파·연구가 최근 30건까지 남는다. [보기]를 누르면 그 지역으로 간다. 정전 중인 세력 땅에는 흰 점선 테두리가 뜬다.</p>
     <h3>화면</h3><p>한 손가락으로 밀어 이동, 두 손가락으로 확대·축소(많이 들어갈 수 있다), ⌖로 전체 보기. 서울처럼 작은 구는 확대해야 이름이 뜬다. ≡ 메뉴의 🔍<b>지역 찾기</b>에 이름 일부를 넣으면 그 지역으로 바로 옮겨 준다.</p>
     <h3>판</h3><p>전국(251곳) 말고 <b>권역 판</b>(수도권·영남·호남충청, 75~79곳)을 고르면 훨씬 짧게 끝난다. 권역마다 특성 분포가 달라 상성이 다르다. ≡ 메뉴의 "난이도 바꿔 새 판"이나 환생 창에서 고른다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
@@ -286,8 +321,19 @@ function loop(now) {
     checkEnd();
   }
   const marks = {};
-  if (sel !== null && state.run.regions[sel].div >= 1) for (const n of adj(state.run, sel)) marks[n] = state.run.regions[n].owner === PLAYER ? 'move' : predict(state, sel, n, state.run.sendRatio).win ? 'win' : 'lose';
-  draw(ctx, state, cam, W, H, { selected: sel, inspect, effects, marks });
+  if (sel !== null && state.run.regions[sel].div >= 1) {
+    // 이어진 내 땅은 '이동', 그 땅들에 붙은 남의 땅은 이길 수 있는지(✓/✕)
+    const seen = new Set([sel]), q = [sel];
+    for (let i = 0; i < q.length; i++) for (const n of adj(state.run, q[i])) {
+      if (seen.has(n)) continue;
+      const r = state.run.regions[n];
+      if (r.owner === PLAYER) { seen.add(n); q.push(n); marks[n] = 'move'; }
+      else if (marks[n] === undefined) marks[n] = predict(state, sel, n, state.run.sendRatio).win ? 'win' : 'lose';
+    }
+  }
+  const peace = new Set();
+  for (let f = 1; f < state.run.factions; f++) if (atPeace(state, PLAYER, f)) peace.add(f);
+  draw(ctx, state, cam, W, H, { selected: sel, inspect, effects, marks, peace });
   refresh();
   requestAnimationFrame(loop);
 }
@@ -302,6 +348,7 @@ function init() {
   document.querySelectorAll('.ratio-btn').forEach(b => b.addEventListener('click', () => { state.run.sendRatio = Number(b.dataset.r); setRatioButtons(state.run.sendRatio); }));
   $('btn-menu').addEventListener('click', openMenu);
   $('btn-auto').addEventListener('click', () => { const n = autoDeploy(state, PLAYER); flashHint(n ? `⚡ 인력 ${n}명을 국경 방어와 선봉 사단에 배치했습니다` : '배치할 인력이 없습니다'); save(); refresh(); });
+  $('btn-log').addEventListener('click', openLog);
   $('btn-tech').addEventListener('click', () => openTech());
   $('btn-diplo').addEventListener('click', () => openDiplo());
   $('btn-center').addEventListener('click', fitAll);
