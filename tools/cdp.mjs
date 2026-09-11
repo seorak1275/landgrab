@@ -36,6 +36,8 @@ export async function launch(url, { width = 390, height = 844 } = {}) {
     logs,
     async goto(u = url) { await send('Page.navigate', { url: u }); await h.wait(1200); },
     async wait(ms) { await new Promise(r => setTimeout(r, ms)); },
+    // 화면 크기 바꾸기 (짧은 아이폰에서 레이아웃 확인용)
+    async metrics(w, hh) { await send('Emulation.setDeviceMetricsOverride', { width: w, height: hh, deviceScaleFactor: 2, mobile: true }); },
     async eval(expr) {
       const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
       if (r.result.exceptionDetails) throw new Error('eval: ' + (r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text));

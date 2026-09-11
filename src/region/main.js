@@ -1,7 +1,7 @@
 // 사단전 모드 배선 (region.html)
 import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, maxAiFor, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, retreat, canRetreat, RETREAT_LOSS, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi, PERSONAS, personaOf, factionName } from './ai.js';
-import { draw, pickRegion, bounds, centerOf, regionBox } from './render.js';
+import { draw, pickRegion, bounds, centerOf, regionBox, refreshGeometry } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
 import { showModal, hideModal, isModalOpen, attachCanvasInput, formatNum, setHint, flashHint, setRatioButtons, SPEEDS, setSpeedButton } from '../ui.js';
 import { LEGACY_ITEMS, itemCost, buy, itemLocked } from '../prestige.js';
@@ -9,9 +9,24 @@ import { SAVE_KEY, newState, save as saveTo, load as loadFrom } from './save.js'
 import { DIFFICULTIES, DEFAULT_DIFFICULTY } from '../sim.js';
 import { PERKS, offerPerks } from '../perks.js';
 import { GENERALS, GENERAL_SPECS, drawGeneral, setLead, rankOf, addRecord, checkMedals, recommendDifficulty } from '../career.js';
-import { openCareer as openCareerModal, generalPickerHtml, pickedGeneral } from '../career_ui.js';
+import { openCareer as openCareerModal, generalPickerHtml, pickedGeneral } from '../career_ui.js';// 화면이 하얗게 뜨는 일을 막는다: 오류를 눈에 보이게 (휴대폰에선 콘솔을 볼 수 없다)
+function showFatal(msg) {
+  let el = document.getElementById('fatal');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'fatal';
+    el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#3b1f24;color:#ffd7d7;padding:10px 12px;font-size:12px;line-height:1.4;max-height:45dvh;overflow:auto;border-top:2px solid #eb5757';
+    document.body.appendChild(el);
+  }
+  el.textContent = `⚠ 오류: ${msg}
+(≡ 메뉴가 열리면 저장 내보내기로 기록을 옮길 수 있습니다. 이 글을 알려주세요.)`;
+}
+window.addEventListener('error', e => showFatal(e.message || String(e.error || e)));
+window.addEventListener('unhandledrejection', e => showFatal((e.reason && (e.reason.message || e.reason)) || '알 수 없음'));
 
-const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60, MAX_ZOOM = 24; // 방치는 없다 — 꺼둔 동안 세상이 멈춘다
+
+
+const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60, MAX_ZOOM = 24;
+const BUILD = '2026-09-11'; // 무엇을 보고 있는지 알 수 있게 메뉴에 찍는다 // 방치는 없다 — 꺼둔 동안 세상이 멈춘다
 const HINT = '내 지역 탭 → 배치 버튼 / 목적지 탭 → 사단 파병 · 남의 지역 탭 → 반란';
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), ctx = canvas.getContext('2d'), cam = createCamera();
@@ -341,7 +356,8 @@ function openMenu() {
     <p><button data-action="status">📊 전황</button> <button data-action="help">📖 도움말</button> <button data-action="find">🔍 지역 찾기</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="restart">난이도 바꿔 새 판</button></p>
     <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드</label></p>
     <p><button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button> <button data-action="reset" style="color:#eb5757">처음부터</button></p>
-    <p><a href="index.html" style="color:#6fb1ff">⬡ 육각 모드로 가기</a></p>`,
+    <p><a href="index.html" style="color:#6fb1ff">⬡ 육각 모드로 가기</a></p>
+    <p class="sub">빌드 ${BUILD} · 지도 ${MAP.regions.reduce((s, r) => s + r.polys.reduce((t, p) => t + p.length, 0), 0)}점</p>`,
     actions: [{ label: '닫기', onClick: hideModal, primary: true }],
     onBodyClick: (a, el) => {
       if (a === 'help') openHelp();
@@ -449,5 +465,15 @@ function init() {
   if (away > 0) notePause(away); else if (!localStorage.getItem(SAVE_KEY)) openFirstRun();
   updateCoach();
   requestAnimationFrame(loop);
+  loadDetail();
+}
+// 지도 정밀본은 화면이 뜬 뒤에 받아 갈아 끼운다 (첫 화면은 가벼운 판으로 바로 그린다)
+async function loadDetail() {
+  try {
+    const detail = (await import('../maps/sgg_detail.js')).default;
+    if (!Array.isArray(detail) || detail.length !== MAP.regions.length) return;
+    MAP.regions.forEach((r, i) => { if (detail[i]) r.polys = detail[i]; });
+    refreshGeometry();
+  } catch (e) { /* 못 받아도 가벼운 판으로 계속 논다 */ }
 }
 init();

@@ -11,6 +11,20 @@ import { MAPS, DEFAULT_MAP } from './mapgen.js';
 import { regionHolders, DIFFICULTIES, DEFAULT_DIFFICULTY, difficultyOf } from './sim.js';
 import { updateTop, updatePanel, upgradePlan, setRatioButtons, setHint, flashHint, bindButtons, showModal, hideModal, isModalOpen, attachCanvasInput, formatNum, SPEEDS, setSpeedButton } from './ui.js';
 
+// 화면이 하얗게 뜨는 일을 막는다: 오류를 눈에 보이게 (휴대폰에선 콘솔을 볼 수 없다)
+function showFatal(msg) {
+  let el = document.getElementById('fatal');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'fatal';
+    el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#3b1f24;color:#ffd7d7;padding:10px 12px;font-size:12px;line-height:1.4;max-height:45dvh;overflow:auto;border-top:2px solid #eb5757';
+    document.body.appendChild(el);
+  }
+  el.textContent = `⚠ 오류: ${msg}
+(≡ 메뉴가 열리면 저장 내보내기로 기록을 옮길 수 있습니다. 이 글을 알려주세요.)`;
+}
+window.addEventListener('error', e => showFatal(e.message || String(e.error || e)));
+window.addEventListener('unhandledrejection', e => showFatal((e.reason && (e.reason.message || e.reason)) || '알 수 없음'));
+
 const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60; // 방치(오프라인 정산)는 없다 — 꺼둔 동안 세상이 멈춘다
 const HINT_DEFAULT = '내 땅 탭 → 목적지 탭 (이어진 먼 땅도 됨). ✓ 이김 ✕ 짐';
 const canvas = document.getElementById('canvas');

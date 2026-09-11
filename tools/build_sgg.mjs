@@ -122,9 +122,23 @@ const out = {
   sea,
 };
 const pts = out.regions.reduce((s, r) => s + r.polys.reduce((t, p) => t + p.length, 0), 0);
-const js = `// 대한민국 시·군·구 (tools/build_sgg.mjs 로 생성, 직접 고치지 말 것) — 지역 ${out.regions.length}개, 꼭짓점 ${pts}개, 뱃길 ${sea.length}개\nexport default ${JSON.stringify(out)};\n`;
-writeFileSync('src/maps/sgg.js', js);
-console.log('regions', out.regions.length, 'points', pts, 'height', out.height, `${(js.length / 1024).toFixed(0)}KB`);
+// 정밀본은 나중에 받는다: 처음엔 가벼운 판으로 바로 그리고, 다 받으면 갈아 끼운다
+// (모바일에서 첫 화면이 늦게 뜨거나 안 뜨는 것을 막는다)
+const coarse = {
+  ...out,
+  regions: out.regions.map((r, i) => ({ ...r, polys: regions[i].rings
+    .filter(ring => Math.abs(ringArea(ring)) >= 0.00002 || ring === regions[i].rings[0])
+    .map(ring => simplify(ring, 0.0012).map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)])) })),
+};
+const cpts = coarse.regions.reduce((s, r) => s + r.polys.reduce((t, p) => t + p.length, 0), 0);
+const cjs = '// 대한민국 시·군·구 — 가벼운 판 (tools/build_sgg.mjs 로 생성, 직접 고치지 말 것) — 지역 ' + coarse.regions.length + '개, 꼭짓점 ' + cpts + '개, 뱃길 ' + sea.length + '개\n'
+  + '// 정밀한 꼭짓점은 sgg_detail.js 에 따로 있고, 화면이 뜬 뒤 배경에서 받아 갈아 끼운다\n'
+  + 'export default ' + JSON.stringify(coarse) + ';\n';
+writeFileSync('src/maps/sgg.js', cjs);
+const djs = '// 대한민국 시·군·구 — 정밀 다각형만 (tools/build_sgg.mjs 로 생성) — 꼭짓점 ' + pts + '개\n'
+  + 'export default ' + JSON.stringify(out.regions.map(r => r.polys)) + ';\n';
+writeFileSync('src/maps/sgg_detail.js', djs);
+console.log('regions', out.regions.length, '· 가벼운 판', cpts, '점', (cjs.length / 1024).toFixed(0) + 'KB', '· 정밀본', pts, '점', (djs.length / 1024).toFixed(0) + 'KB', '· height', out.height);
 console.log('types', out.regions.reduce((m, r) => (m[r.t] = (m[r.t] || 0) + 1, m), {}));
 console.log('sea links', sea.map(([a, b]) => `${regions[a].label}→${regions[b].label}`).join(', '));
 console.log('avg adj', (adj.reduce((s, a) => s + a.length, 0) / adj.length).toFixed(2), 'max', Math.max(...adj.map(a => a.length)));

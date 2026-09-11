@@ -15,7 +15,10 @@ export const centerOf = id => [MAP.regions[id].c[0] * SCALE, MAP.regions[id].c[1
 const hex = (h, a) => `rgba(${parseInt(h.slice(1, 3), 16)},${parseInt(h.slice(3, 5), 16)},${parseInt(h.slice(5, 7), 16)},${a})`;
 
 // 화면 좌표 → 지역 id (bbox → 점-다각형)
-const bboxes = MAP.regions.map(r => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of r.polys) for (const [x, y] of p) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; });
+const boxOf = r => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of r.polys) for (const [x, y] of p) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; };
+let bboxes = MAP.regions.map(boxOf);
+// 정밀 다각형을 나중에 갈아 끼운 뒤 부른다
+export function refreshGeometry() { bboxes = MAP.regions.map(boxOf); }
 export const regionBox = id => bboxes[id]; // [x0,y0,x1,y1] (지도 단위)
 export function pickRegion(cam, W, H, sx, sy, run = null) {
   const [wx, wy] = screenToWorld(cam, W, H, sx, sy); const x = wx / SCALE, y = wy / SCALE;

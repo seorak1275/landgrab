@@ -70,7 +70,7 @@ node tools/probe.mjs greedy 3 7200 korea      # 육각 시뮬 추이 실측 (idl
 node tools/_rprobe.mjs greedy 3600 1 hell     # 사단전 추이 실측 (능동 플레이어 봇은 tools/region_bot.mjs)
 node tools/cdp.mjs http://localhost:8765/ tools/smoke.mjs   # 헤드리스 크롬 화면 검증
 node tools/build_maps.mjs       # 행정구역 GeoJSON → src/maps/*.js (원본은 tools/geo/ 에 내려받음)
-node tools/build_sgg.mjs        # 시·군·구 고해상도 원본(55MB) → src/maps/sgg.js (2~3분, 지역 크기별 단순화)
+node tools/build_sgg.mjs        # 시·군·구 고해상도 원본(55MB) → src/maps/sgg.js(가벼운 판 168KB) + sgg_detail.js(정밀본 903KB, 화면이 뜬 뒤 배경에서 받아 갈아 끼움). 2~3분
 ```
 
 - `src/` — hex(격자) · world(판 생성) · mapgen(실제 지도→격자) · maps/(지도 데이터) · sim(생산·행군·전투·건물) · ai · perks(축복) · prestige · save · render(캔버스) · ui · main
