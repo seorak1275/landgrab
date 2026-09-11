@@ -33,6 +33,83 @@ export const REBEL_DELAY = 10, REBEL_RATIO = 0.7;
 export const AMOUNTS = [10, 100, 500, 'max'];
 export const TRAIT_DEF = { mountain: 1.5, city: 1.2, coast: 1.0, plain: 0.9 };
 export const TRAIT_NAME = { mountain: '⛰산악', city: '🏙도시', coast: '🌊해안', plain: '🌾평야' };
+// ---- 기술 연구: 한 판 동안만 남고, 인력 풀로 산다. 연구할수록 다음 값이 오른다 (AI도 같은 규칙) ----
+export const TECHS = {
+  drill:    { name: '집중훈련', icon: '🎯', desc: '공격력 +20%',                 cost: 200, attack: 1.2 },
+  march:    { name: '고속행군', icon: '🏃', desc: '행군 속도 +50%',              cost: 200, speed: 1.5 },
+  agit:     { name: '침과공작', icon: '📣', desc: '반란 봉기 비율 70% → 90%',    cost: 250, rebel: 0.9 },
+  mobilize: { name: '동원령',   icon: '📯', desc: '생산 +25%',                   cost: 300, prod: 1.25 },
+};
+export const TECH_STEP = 1.6;
+export const techsOf = (run, f) => (run.tech && run.tech[f]) || {};
+export const hasTech = (run, f, key) => !!techsOf(run, f)[key];
+export const techCount = (run, f) => Object.keys(techsOf(run, f)).length;
+export function techCost(state, f, key) { return TECHS[key] ? Math.round(TECHS[key].cost * Math.pow(TECH_STEP, techCount(state.run, f))) : Infinity; }
+export function research(state, f, key) {
+  const run = state.run;
+  if (!TECHS[key] || hasTech(run, f, key)) return false;
+  const c = techCost(state, f, key);
+  if ((run.pool[f] || 0) < c) return false;
+  run.pool[f] -= c;
+  if (!run.tech) run.tech = [];
+  run.tech[f] = { ...techsOf(run, f), [key]: true };
+  emit({ type: 'research', owner: f, key });
+  return true;
+}
+const techMul = (run, f, field) => Object.keys(techsOf(run, f)).reduce((m, k) => m * (TECHS[k][field] || 1), 1);
+
+// ---- 외교: 세력 쌍마다 관계(-100~100)와 정전. 정전 중엔 서로 못 친다. 어기면 관계가 크게 깎인다 ----
+export const PACT_DUR = 120, PACT_ACCEPT = 20, REL_MIN = -100, REL_MAX = 100, PROPOSE_COOLDOWN = 30;
+export const BETRAY_PENALTY = 60, BETRAY_WITNESS = 15;
+const pairKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+export function relOf(state, a, b) { const R = state.run.rel; return (R && R[a] && R[a][b]) || 0; }
+export function addRel(state, a, b, v) {
+  const R = state.run.rel; if (!R || a === b || !R[a] || !R[b]) return;
+  const x = Math.max(REL_MIN, Math.min(REL_MAX, (R[a][b] || 0) + v));
+  R[a][b] = x; R[b][a] = x; // 관계는 서로 같게 본다
+}
+export function atPeace(state, a, b) { const p = state.run.pacts || {}; return a !== b && (p[pairKey(a, b)] || 0) > (state.run.elapsed || 0); }
+export function pactLeft(state, a, b) { return Math.max(0, ((state.run.pacts || {})[pairKey(a, b)] || 0) - (state.run.elapsed || 0)); }
+export function leaderOf(state) { // 지역이 가장 많은 세력 (다들 여기로 몰린다)
+  let best = null;
+  for (let f = 0; f < state.run.factions; f++) { const n = owned(state, f).length; if (!best || n > best.n) best = { f, n }; }
+  return best ? best.f : PLAYER;
+}
+// 정전 제안: 받아주면 true. 사이가 나쁘거나, 상대가 크게 앞서 있거나, 내가 선두면 거절한다
+export function pactAccepts(state, from, to) {
+  if (from === to || atPeace(state, from, to)) return false;
+  const rel = relOf(state, from, to);
+  if (rel < -40) return false;
+  const mine = owned(state, from).length, theirs = owned(state, to).length;
+  const lead = leaderOf(state);
+  if (from === lead && mine > theirs * 1.5) return false; // 선두와는 손잡지 않는다
+  return rel + (theirs < mine ? 0 : 25) + (lead !== from && lead !== to ? 25 : 0) >= PACT_ACCEPT;
+}
+export function refusedLeft(state, from, to) { const r = (state.run.refused || {})[pairKey(from, to)]; return r === undefined ? 0 : Math.max(0, r + PROPOSE_COOLDOWN - (state.run.elapsed || 0)); }
+export function proposePact(state, from, to, force = false) {
+  if (!force && refusedLeft(state, from, to) > 0) return false; // 얼마 전에 거절당했다
+  if (!force && !pactAccepts(state, from, to)) {
+    if (!state.run.refused) state.run.refused = {};
+    state.run.refused[pairKey(from, to)] = state.run.elapsed || 0;
+    return false;
+  }
+  if (!state.run.pacts) state.run.pacts = {};
+  state.run.pacts[pairKey(from, to)] = (state.run.elapsed || 0) + PACT_DUR;
+  addRel(state, from, to, 10);
+  emit({ type: 'pact', a: from, b: to });
+  return true;
+}
+export function breakPact(state, betrayer, victim) {
+  const p = state.run.pacts || {};
+  if (!atPeace(state, betrayer, victim)) return false;
+  delete p[pairKey(betrayer, victim)];
+  addRel(state, betrayer, victim, -BETRAY_PENALTY);
+  for (let f = 0; f < state.run.factions; f++) if (f !== betrayer && f !== victim) addRel(state, betrayer, f, -BETRAY_WITNESS); // 남 보기에도 믿을 수 없는 자
+  emit({ type: 'betray', owner: betrayer, victim });
+  return true;
+}
+export function rebelRatio(state, f) { return hasTech(state.run, f, 'agit') ? TECHS.agit.rebel : REBEL_RATIO; }
+
 export const AI_RAMP = 0.1, AI_RAMP_MAX = 1.0;
 export const HOME = '속초시'; // 설악산
 export const TRUCE = 120; // 시작 뒤 이 시간(초) 동안 AI는 플레이어 지역을 치거나 반란하지 않는다 (첫 배치를 할 틈. 방치를 없앤 뒤 6분 → 2분)
@@ -41,11 +118,11 @@ export const truce = state => (state.run.elapsed || 0) < TRUCE;
 const lv = (state, k) => (state.legacy && state.legacy.upgrades && state.legacy.upgrades[k]) || 0;
 export function difficultyOf(state) { return DIFFICULTIES[state.legacy.difficulty] || DIFFICULTIES[DEFAULT_DIFFICULTY]; }
 export function aiMul(state) { return difficultyOf(state).mul + 0.1 * state.legacy.prestigeCount + Math.min(AI_RAMP_MAX, AI_RAMP * (state.run.elapsed || 0) / 600); }
-export function prodMul(state, f) { return f === PLAYER ? (1 + 0.1 * lv(state, 'gold') + 0.1 * lv(state, 'soldiers')) * (perkOf(state).gold || 1) * (perkOf(state).soldiers || 1) : aiMul(state); }
-export function attackMul(state, f) { return f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) : 1; }
+export function prodMul(state, f) { const base = f === PLAYER ? (1 + 0.1 * lv(state, 'gold') + 0.1 * lv(state, 'soldiers')) * (perkOf(state).gold || 1) * (perkOf(state).soldiers || 1) : aiMul(state); return base * techMul(state.run, f, 'prod'); }
+export function attackMul(state, f) { return (f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) : 1) * techMul(state.run, f, 'attack'); }
 export function defMul(state, r) { const base = (TRAIT_DEF[MAP.regions[r.id].tr] || 1) * (r.iso ? ISO_DEF : 1); return r.owner === PLAYER ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) : base; }
 export function poolCap(state, f) { return POOL_CAP * (f === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1); }
-export function speedOf(state, f) { return f === PLAYER ? REGION_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) : REGION_SPEED; }
+export function speedOf(state, f) { return (f === PLAYER ? REGION_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) : REGION_SPEED) * techMul(state.run, f, 'speed'); }
 export function prodOf(state, r) { return MAP.regions[r.id].prod * prodMul(state, r.owner) * (r.iso ? ISO_PROD : 1); }
 export function aiCountFor(prestige) { return Math.min(4 + Math.floor(prestige / 3), 6); }
 export const info = id => MAP.regions[id];
@@ -80,7 +157,7 @@ export function newRun(seed, legacy = {}, perk = null, board = legacy.boardPref 
     return { id, owner: NEUTRAL, def: Math.round((15 + m.prod * 20) * (0.8 + rand() * 0.5) * garrisonMul), div: 0 }; // 구 55·시 45·군 35 안팎
   });
   const pool = Array(factions).fill(100); pool[PLAYER] = 300 + 100 * (up.startGold || 0) + (pk.startGold || 0);
-  const run = { seed, mode: 'region', board: bd, factions, regions, pool, capitals, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
+  const run = { seed, mode: 'region', board: bd, factions, regions, pool, capitals, tech: Array.from({ length: factions }, () => ({})), rel: Array.from({ length: factions }, () => Array(factions).fill(0)), pacts: {}, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
   refreshSupply({ legacy, run });
   return run;
 }
@@ -222,6 +299,7 @@ export function move(state, from, to, ratio) {
   if (!f || !t || f.owner === NEUTRAL || f.owner === OFF || t.owner === OFF || from === to) return { type: 'invalid' };
   if (!adj(run, from).includes(to)) return { type: 'invalid' };
   const size = Math.floor(f.div * ratio); if (size < 1) return { type: 'invalid' };
+  if (t.owner !== f.owner && t.owner !== NEUTRAL) breakPact(state, f.owner, t.owner); // 정전 중이었다면 배신
   const path = [from, to];
   f.div -= size;
   const a = depart(state, f.owner, size, path);
@@ -240,8 +318,9 @@ export function canRebel(state, f, id) { const r = state.run.regions[id]; return
 export function rebel(state, f, id, n) {
   if (!canRebel(state, f, id)) return 0;
   const a = amountOf(n, state.run.pool[f]); if (a < 10) return 0;
+  breakPact(state, f, state.run.regions[id].owner); // 반란도 배신이다
   state.run.pool[f] -= a;
-  state.run.rebels.push({ owner: f, target: id, size: Math.round(a * REBEL_RATIO), eta: REBEL_DELAY, am: attackMul(state, f) });
+  state.run.rebels.push({ owner: f, target: id, size: Math.round(a * rebelRatio(state, f)), eta: REBEL_DELAY, am: attackMul(state, f) });
   emit({ type: 'rebel', id, owner: f, size: a });
   return a;
 }

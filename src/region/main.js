@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub } from './game.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub, TECHS, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi } from './ai.js';
 import { draw, pickRegion, bounds, centerOf } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -34,6 +34,9 @@ setListener(e => {
   if (e.type === 'capture') { effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), speed: 1 / 0.7 }); if (e.prevOwner === PLAYER) flashHint(`${info(e.id).n}을(를) ${ownerName(e.owner)}에게 빼앗겼습니다`); if (e.owner === PLAYER) flashHint(`🏳 ${info(e.id).n} 점령! 사단 ${Math.floor(e.remaining)}명 남음`); }
   if (e.type === 'uprising') { effects.push({ id: e.id, t: 0, color: ownerColor(e.owner), text: '✊봉기', speed: 1 / 1 }); if (state.run.regions[e.id].owner === PLAYER) flashHint(`✊ ${info(e.id).n}에서 ${ownerName(e.owner)}의 반란군 ${e.size}명 봉기!`, 3000); }
   if (e.type === 'repel' && e.owner === PLAYER) flashHint(`공격 실패 · ${info(e.id).n}`);
+  if (e.type === 'pact' && (e.a === PLAYER || e.b === PLAYER)) flashHint(`🤝 ${ownerName(e.a === PLAYER ? e.b : e.a)}와(과) 정전 ${PACT_DUR}초`);
+  if (e.type === 'betray' && e.victim === PLAYER) flashHint(`💢 ${ownerName(e.owner)}이(가) 정전을 깨고 쳐들어옵니다!`, 4000);
+  if (e.type === 'research' && e.owner === PLAYER) flashHint(`🔬 ${TECHS[e.key].icon} ${TECHS[e.key].name} 연구 완료 — ${TECHS[e.key].desc}`, 4000);
 });
 
 // ---- 패널 ----
@@ -45,6 +48,9 @@ function refresh() {
   setText('top-pool', `👥 ${formatNum(totalPool(state, PLAYER))}/${Math.floor(poolCap(state, PLAYER))} (+${totalProd(state, PLAYER).toFixed(1)}/초)`);
   setText('top-regions', `🏳 ${owned(state, PLAYER).length}/${activeCount(state)}`);
   setText('top-prestige', `환생 ${state.legacy.prestigeCount}`);
+  setText('btn-tech', `🔬 연구 ${techCount(state.run, PLAYER)}/${Object.keys(TECHS).length}`);
+  const pacts = []; for (let f = 1; f < state.run.factions; f++) if (atPeace(state, PLAYER, f)) pacts.push(f);
+  setText('btn-diplo', pacts.length ? `🤝 정전 ${pacts.length}` : '🤝 외교');
   setText('top-points', `✨ ${state.legacy.points}`);
   const id = sel !== null ? sel : inspect;
   if (id === null) {
@@ -115,12 +121,42 @@ function openShop(after = hideModal) {
   showModal({ title: `유산 상점 · ✨ ${state.legacy.points}`, html: `<p class="sub">이 모드에선 풍요·징집=생산, 성벽술=수비, 시작 골드=시작 인력, 병참=인력 한도, 약탈=점령 시 인력 흡수. 통치·건축은 효과 없음.</p>${rows}`, actions: [{ label: '닫기', onClick: after, primary: true }],
     onBodyClick: a => { if (a.startsWith('buy:') && buy(state, a.slice(4))) { save(); openShop(after); } } });
 }
+const relWord = v => (v <= -50 ? '적대' : v <= -15 ? '냉담' : v < 15 ? '보통' : v < 50 ? '우호' : '동맹');
+function openTech(after = hideModal) {
+  const rows = Object.entries(TECHS).map(([k, t]) => {
+    const got = hasTech(state.run, PLAYER, k), cost = techCost(state, PLAYER, k);
+    return `<div class="shop-row"><span class="name">${t.icon} ${t.name}<span class="desc">${t.desc}</span></span><button data-action="tech:${k}" ${got || totalPool(state, PLAYER) < cost ? 'disabled' : ''}>${got ? '완료' : `👥 ${cost}`}</button></div>`;
+  }).join('');
+  showModal({ title: `🔬 기술 연구 · 인력 ${Math.floor(totalPool(state, PLAYER))}`, html: `<p class="sub">이 판 동안만 남는다(환생하면 사라짐). 하나 연구할 때마다 다음 기술 값이 1.6배가 된다. AI도 같은 규칙으로 연구한다.</p>${rows}`,
+    actions: [{ label: '닫기', onClick: after, primary: true }],
+    onBodyClick: a => { if (a.startsWith('tech:')) { const k = a.slice(5); if (research(state, PLAYER, k)) { save(); openTech(after); } else flashHint('인력이 모자랍니다'); } } });
+}
+function openDiplo(after = hideModal) {
+  const lead = leaderOf(state);
+  const rows = [];
+  for (let f = 1; f < state.run.factions; f++) {
+    const n = owned(state, f).length, rel = relOf(state, PLAYER, f), peace = atPeace(state, PLAYER, f);
+    const cool = Math.ceil(refusedLeft(state, PLAYER, f));
+    const btn = peace ? `<button disabled>정전 ${Math.ceil(pactLeft(state, PLAYER, f))}초</button>`
+      : cool > 0 ? `<button disabled>거절 ${cool}초</button>`
+      : `<button data-action="pact:${f}">정전 제안</button>`;
+    rows.push(`<div class="shop-row"><span class="name" style="color:${ownerColor(f)}">${ownerName(f)}${f === lead ? ' 👑' : ''} <b>${n}곳</b><span class="desc">관계 ${rel > 0 ? '+' : ''}${Math.round(rel)} (${relWord(rel)})${peace ? ' · 🤝 정전 중' : ''}</span></span>${btn}</div>`);
+  }
+  const others = [];
+  for (let a = 1; a < state.run.factions; a++) for (let b = a + 1; b < state.run.factions; b++) if (atPeace(state, a, b)) others.push(`${ownerName(a)}–${ownerName(b)}`);
+  showModal({ title: '🤝 외교', html: `<p class="sub">정전은 ${PACT_DUR}초. 정전 중엔 서로 치지 못하고, 어기고 치면(반란 포함) 관계가 크게 깎이고 <b>다른 세력도 나를 믿지 않는다</b>. 다들 👑선두를 싫어해서, 내가 앞서면 정전을 받아주지 않는다.</p>${rows.join('')}
+    <p class="sub">AI끼리 정전: ${others.length ? others.join(' · ') : '없음'}</p>`,
+    actions: [{ label: '닫기', onClick: after, primary: true }],
+    onBodyClick: a => { if (a.startsWith('pact:')) { const f = Number(a.slice(5)); const ok = proposePact(state, PLAYER, f); flashHint(ok ? `🤝 ${ownerName(f)}와(과) 정전 ${PACT_DUR}초` : `${ownerName(f)}이(가) 거절했습니다 (내가 앞서거나 사이가 나쁘면 안 받아줍니다)`); save(); openDiplo(after); } } });
+}
 function openHelp() {
   showModal({ title: '📖 사단전 도움말', html: `<div class="help">
     <h3>지역과 인력</h3><p>대한민국 251개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 2·시 1.5·군 1/초)이 <b>하나의 인력 풀</b>(상단 👥, 최대 500)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려지니 계속 배치하자.</p>
     <h3>방어 배치 · 사단</h3><p>풀에서 🛡<b>방어인력</b>(그 지역 고정 수비)이나 ⚔<b>사단</b>(움직이는 부대, 지역당 하나, 인원 무제한)으로 옮긴다. +10/+100/+500/최대.</p>
     <h3>파병</h3><p>내 지역 선택 → <b>인접한</b> 지역 탭. 파병 비율(25/50/100%)만큼 사단이 행군(2초)해 내 지역이면 합류, 남의 지역이면 전투. 선택하면 인접 지역이 밝아진다(✓이김/✕짐). 먼 곳은 반란으로.</p>
     <h3>반란</h3><p>남이 가진 지역을 탭 → ✊반란 10/100/500/최대. 내 모든 풀에서 빠지고 10초 뒤 70%가 그 지역 안에서 봉기해 방어+사단과 싸운다. 인접할 필요 없음. AI도 똑같이 한다.</p>
+    <h3>연구</h3><p>패널의 🔬<b>연구</b>로 인력을 들여 그 판 동안 쓸 기술을 산다: ${Object.values(TECHS).map(t => `${t.icon}${t.name}(${t.desc})`).join(' · ')}. 하나 살 때마다 다음 값이 1.6배. AI도 똑같이 연구한다.</p>
+    <h3>외교</h3><p>🤝<b>외교</b>로 AI에 <b>정전</b>(${PACT_DUR}초)을 제안한다. 정전 중엔 서로 못 친다. 어기면 관계가 크게 깎이고 다른 세력도 나를 믿지 않는다. AI들은 👑<b>선두를 싫어해</b> 자기들끼리 손을 잡으니, 내가 너무 앞서면 사방에서 몰려온다.</p>
     <h3>보급 (본국 연결)</h3><p>내 <b>본국</b>(수도, 잃으면 생산력이 가장 큰 내 지역)에서 <b>내 지역만 밟아</b> 닿지 않는 지역은 ⛓<b>고립</b>이다. 고립 지역은 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}이고 지도에서 어둡게 보인다. AI도 똑같이 당하니, 크게 뻗은 AI의 <b>허리를 끊으면</b> 뒤쪽 땅이 한꺼번에 약해진다.</p>
     <h3>판</h3><p>전국(251곳) 말고 <b>권역 판</b>(수도권·영남·호남충청, 75~79곳)을 고르면 훨씬 짧게 끝난다. 권역마다 특성 분포가 달라 상성이 다르다. ≡ 메뉴의 "난이도 바꿔 새 판"이나 환생 창에서 고른다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
@@ -182,6 +218,8 @@ function init() {
   document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => onAct(b.dataset.act, b.dataset.n)));
   document.querySelectorAll('.ratio-btn').forEach(b => b.addEventListener('click', () => { state.run.sendRatio = Number(b.dataset.r); setRatioButtons(state.run.sendRatio); }));
   $('btn-menu').addEventListener('click', openMenu);
+  $('btn-tech').addEventListener('click', () => openTech());
+  $('btn-diplo').addEventListener('click', () => openDiplo());
   $('btn-center').addEventListener('click', fitAll);
   $('btn-speed').addEventListener('click', () => { const i = SPEEDS.indexOf(state.legacy.speed || 1); state.legacy.speed = SPEEDS[(i + 1) % SPEEDS.length]; setSpeedButton(state.legacy.speed); save(); });
   attachCanvasInput(canvas, cam, { onTap, minScale: 0.3, maxScale: 6 });

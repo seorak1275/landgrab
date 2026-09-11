@@ -1,9 +1,10 @@
 // 사단전 AI: 배치(국경 방어/내부 사단) → 공격 → 집결 → 반란 → 내부 사단 국경으로
-import { PLAYER, NEUTRAL, OFF, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, bfsOwn, pathTo, party, truce } from './game.js';
+import { PLAYER, NEUTRAL, OFF, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, bfsOwn, pathTo, party, truce, TECHS, research, hasTech, techCost, atPeace, proposePact, addRel, leaderOf, relOf } from './game.js';
 import { perkOf } from '../perks.js';
 
 export function aiPeriod(state) { return 8 * (1 + 0.08 * ((state.legacy.upgrades || {}).aiSlow || 0)) * (perkOf(state).aiSlow || 1); }
 export const GATHER_EVERY = 4, REBEL_EVERY = 6, REBEL_MIN_POOL = 150;
+export const DIPLO_EVERY = 20, TECH_ORDER = ['mobilize', 'drill', 'march', 'agit'], TECH_RESERVE = 150;
 const pri = owner => (owner === NEUTRAL ? 0 : 1); // 중립 먼저
 
 export function aiAct(state, f) {
@@ -13,7 +14,14 @@ export function aiAct(state, f) {
   const am = attackMul(state, f);
   const isBorder = r => adj(run, r.id).some(n => run.regions[n].owner !== f);
   const othersBattle = r => r.battle && !party(r, f);
-  const offLimits = r => truce(state) && r.owner === PLAYER; // 초반 휴전
+  const offLimits = r => (truce(state) && r.owner === PLAYER) || atPeace(state, f, r.owner); // 초반 휴전 · 정전 중인 상대
+
+  // 0. 연구: 인력이 넉넉하면 순서대로 하나씩 (남는 인력이 있어야 배치도 하니 TECH_RESERVE는 남긴다)
+  for (const key of TECH_ORDER) {
+    if (hasTech(run, f, key)) continue;
+    if (run.pool[f] >= techCost(state, f, key) + TECH_RESERVE) research(state, f, key);
+    break;
+  }
 
   // 0. 반란 (REBEL_EVERY 주기마다, 배치 전에): 풀 합이 넉넉하면 플레이어(없으면 가장 약한 세력) 지역 중 수비가 가장 약한 곳에
   if (run.aiTurns[f] % REBEL_EVERY === 0 && totalPool(state, f) >= REBEL_MIN_POOL) {
@@ -77,8 +85,27 @@ export function aiAct(state, f) {
   }
 }
 
+// 외교 (DIPLO_EVERY초마다): 다들 선두를 싫어하고, 선두가 아닌 세력끼리 손을 잡는다.
+// 한 얼굴만 커지는 판을 막는 장치라 플레이어가 선두여도 똑같이 적용된다
+export function diplomacy(state) {
+  const run = state.run;
+  const lead = leaderOf(state), leadN = owned(state, lead).length;
+  for (let f = 1; f < run.factions; f++) {
+    if (f === lead) continue;
+    if (leadN > owned(state, f).length * 1.2) addRel(state, f, lead, -4); // 커질수록 미움을 산다
+    for (let g = 1; g < run.factions; g++) {
+      if (g === f || g === lead || atPeace(state, f, g)) continue;
+      if (leadN > owned(state, f).length * 1.3) proposePact(state, f, g);
+    }
+    // 선두에게 얻어맞는 중이면 플레이어에게도 손을 내민다 (플레이어가 선두가 아니고 사이가 나쁘지 않을 때)
+    if (lead !== PLAYER && f !== PLAYER && !atPeace(state, f, PLAYER) && relOf(state, f, PLAYER) >= 0 && leadN > owned(state, f).length * 1.5) proposePact(state, f, PLAYER);
+  }
+}
+
 export function runAi(state, dt) {
   const run = state.run;
+  run.diploTimer = (run.diploTimer || 0) - dt;
+  while (run.diploTimer <= 0) { diplomacy(state); run.diploTimer += DIPLO_EVERY; }
   for (let f = 1; f < run.factions; f++) {
     run.aiTimers[f] -= dt;
     while (run.aiTimers[f] <= 0) { aiAct(state, f); run.aiTimers[f] += aiPeriod(state); }

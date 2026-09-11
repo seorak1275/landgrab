@@ -58,5 +58,19 @@ export async function run(h) {
   await h.shot(`${SP}/r4_capital_board.png`);
   // 고립 표시: 내 지역 하나를 멀리 떨어뜨려 본다
   say('isolated', await h.eval(`(async () => { const { refreshSupply, boardIds, adj } = await import('./src/region/game.js'); const run = __game.state.run; const ids = boardIds('capital'); const far = ids.find(i => run.regions[i].owner === -1 && !adj(run, i).some(n => run.regions[n].owner === 0)); run.regions[far].owner = 0; refreshSupply(__game.state); return 'far=' + far + ' iso=' + run.regions[far].iso + ' panelReady=' + !!document.getElementById('p-stats'); })()`));
+  // 연구·외교 창
+  await h.eval(`__game.state.run.pool[0] = 500`); await h.wait(200);
+  await h.eval(`document.getElementById('btn-tech').click()`); await h.wait(200);
+  say('tech modal', await h.eval(`document.getElementById('modal-title').textContent + ' rows=' + document.querySelectorAll('.shop-row').length + ' enabled=' + [...document.querySelectorAll('.shop-row button')].filter(b => !b.disabled).length`));
+  await h.eval(`document.querySelector('[data-action="tech:drill"]').click()`); await h.wait(300);
+  say('after research', await h.eval(`(async () => { const g = await import('./src/region/game.js'); return 'has=' + g.hasTech(__game.state.run, 0, 'drill') + ' pool=' + Math.floor(__game.state.run.pool[0]) + ' btn=' + document.getElementById('btn-tech').textContent; })()`));
+  await h.shot(`${SP}/r5_tech.png`);
+  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
+  await h.eval(`document.getElementById('btn-diplo').click()`); await h.wait(200);
+  say('diplo modal', await h.eval(`document.getElementById('modal-title').textContent + ' rows=' + document.querySelectorAll('.shop-row').length`));
+  await h.eval(`document.querySelector('[data-action^="pact:"]').click()`); await h.wait(300);
+  say('after pact', await h.eval(`document.getElementById('hint').textContent + ' | btn=' + document.getElementById('btn-diplo').textContent`));
+  await h.shot(`${SP}/r6_diplo.png`);
+  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
   say('console errors', JSON.stringify(h.errors()));
 }
