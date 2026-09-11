@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import MAP from '../src/maps/sgg.js';
-import { PLAYER, NEUTRAL, OFF, ISO_PROD, ISO_DEF, BOARDS, boardIds, newRun, tick, status, owned, adj, neighbors, prodOf, defMul, move, supplyHub, refreshSupply, bfsDist, totalProd } from '../src/region/game.js';
+import { PLAYER, NEUTRAL, OFF, ISO_PROD, ISO_DEF, BOARDS, boardIds, maxAiFor, newRun, tick, status, owned, adj, neighbors, prodOf, defMul, move, supplyHub, refreshSupply, bfsDist, totalProd } from '../src/region/game.js';
 import { runAi } from '../src/region/ai.js';
 
 function mk(seed = 1, board = 'all', legacy = {}) {
@@ -42,15 +42,20 @@ test('권역 판의 판 밖 지역은 OFF: 이웃에서 빠지고, 정복 판정
   // 내 수도는 그 권역의 home
   const s2 = mk(2, 'yeongnam');
   assert.equal(MAP.regions[cap(s2, PLAYER).id].n, BOARDS.yeongnam.home);
-  assert.ok(s2.run.factions - 1 <= BOARDS.yeongnam.maxAi);
+  assert.ok(s2.run.factions - 1 <= maxAiFor('yeongnam'));
 });
 
 test('보급: 수도에서 내 지역만 밟아 닿지 않으면 고립 — 생산 ×0.4, 수비 ×0.8', () => {
   const s = mk(3);
   const home = cap(s, PLAYER);
   // 수도에 붙은 지역 하나와, 거기서 한 칸 더 간 지역을 내 것으로 (사슬)
-  const a = adj(s.run, home.id)[0];
-  const b = adj(s.run, a).find(x => x !== home.id && s.run.regions[x].owner === NEUTRAL);
+  // b 는 수도와 직접 닿지 않아야 한다 (수도권처럼 촘촘한 곳에서는 되돌아 붙는다)
+  let a = null, b = null;
+  for (const x of adj(s.run, home.id)) {
+    const y = adj(s.run, x).find(z => z !== home.id && s.run.regions[z].owner === NEUTRAL && !adj(s.run, home.id).includes(z));
+    if (y !== undefined) { a = x; b = y; break; }
+  }
+  assert.ok(a !== null && b !== null, '사슬을 만들 자리가 있어야 한다');
   s.run.regions[a].owner = PLAYER; s.run.regions[b].owner = PLAYER;
   refreshSupply(s);
   assert.equal(s.run.regions[a].iso, false);

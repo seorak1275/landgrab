@@ -1,26 +1,34 @@
 // 사단전: 내 땅을 따라 이어서 가는 자동 진격 (한 칸씩 행군하는 규칙은 그대로)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PLAYER, NEUTRAL, newRun, tick, owned, adj, move, moveFar, pathThroughMine, runArmies, runBattles, resolveBattle, REGION_SPEED } from '../src/region/game.js';
+import { PLAYER, NEUTRAL, newRun, tick, owned, adj, bfsDist, move, moveFar, pathThroughMine, runArmies, runBattles, resolveBattle, REGION_SPEED } from '../src/region/game.js';
 
 function mk(seed = 1) { const l = { points: 0, prestigeCount: 0, upgrades: {}, difficulty: 'normal' }; return { legacy: l, run: newRun(seed, l) }; }
 const cap = (s, f) => s.run.regions.find(r => r.owner === f);
 // 수도에서 뻗어 나가는 내 땅 사슬을 만든다
 function chain(s, n) {
-  const ids = [cap(s, PLAYER).id];
+  const start = cap(s, PLAYER).id, ids = [start];
+  const dist = bfsDist(start);
   while (ids.length <= n) {
-    const next = adj(s.run, ids[ids.length - 1]).find(x => !ids.includes(x) && s.run.regions[x].owner === NEUTRAL);
+    const cur = ids[ids.length - 1];
+    const next = adj(s.run, cur).filter(x => !ids.includes(x) && s.run.regions[x].owner === NEUTRAL)
+      .sort((a, b) => dist[b] - dist[a])[0]; // 출발지에서 먼 쪽으로 뻗는다
     if (next === undefined) break;
     s.run.regions[next].owner = PLAYER; ids.push(next);
   }
   return ids;
 }
+// 사슬 끝에 붙어 있으면서 출발지에서는 떨어진 목표
+function farTarget(s, ids) {
+  const start = ids[0], last = ids[ids.length - 1];
+  return adj(s.run, last).find(x => !ids.includes(x) && !adj(s.run, start).includes(x));
+}
 
 test('pathThroughMine: 내 땅만 밟아 목적지까지, 목적지는 내 땅에 붙어 있어야 한다', () => {
   const s = mk(2);
   const ids = chain(s, 3);
-  const last = ids[ids.length - 1];
-  const target = adj(s.run, last).find(x => !ids.includes(x));
+  const target = farTarget(s, ids);
+  assert.ok(target !== undefined);
   const p = pathThroughMine(s.run, ids[0], target);
   assert.ok(p, '경로가 있어야 한다');
   assert.equal(p[0], ids[0]);
@@ -35,8 +43,8 @@ test('pathThroughMine: 내 땅만 밟아 목적지까지, 목적지는 내 땅�
 test('moveFar: 이어진 길이 있으면 여러 칸을 자동으로 진격한다 (도착 시간도 그만큼)', () => {
   const s = mk(3);
   const ids = chain(s, 3);
-  const from = ids[0], last = ids[ids.length - 1];
-  const target = adj(s.run, last).find(x => !ids.includes(x));
+  const from = ids[0], target = farTarget(s, ids);
+  assert.ok(target !== undefined);
   s.run.regions[from].div = 300; s.run.regions[target].def = 5;
   const res = moveFar(s, from, target, 1);
   assert.equal(res.type, 'attack');

@@ -6,7 +6,7 @@ import { PLAYER, NEUTRAL, PROV_PROD, PROV_DEF, newRun, tick, owned, provinceIds,
 
 function mk(seed = 1, board = 'all', legacy = {}) {
   const l = { points: 0, prestigeCount: 0, upgrades: {}, difficulty: 'normal', ...legacy };
-  return { legacy: l, run: newRun(seed, l, null, board) };
+  return { legacy: l, run: newRun(seed, l, null, board, l.homePref) };
 }
 const take = (s, ids, f = PLAYER) => { for (const id of ids) { s.run.regions[id].owner = f; s.run.regions[id].def = 10; } refreshSupply(s); };
 
@@ -21,12 +21,12 @@ test('시·도 묶음: 판 안의 지역만, 한 곳뿐인 시·도(세종)는 �
 });
 
 test('한 시·도를 전부 가지면 그 지역 생산 +30%, 수비 +15%', () => {
-  const s = mk(2);
+  const s = mk(2, 'all', { homePref: '속초시' }); // 강원에서 시작해 그 시·도를 채워 본다
   const gw = provinceIds('all').get('강원');
-  const one = owned(s, PLAYER)[0].id; // 내 수도(속초시, 강원) — 늘 본국과 이어져 있어 고립 배율이 섞이지 않는다
+  const one = owned(s, PLAYER)[0].id; // 내 수도 — 늘 본국과 이어져 있어 고립 배율이 섞이지 않는다
   assert.ok(gw.includes(one));
   const before = { prod: 0, def: 0 };
-  const had = provProgress(s, '강원').mine; // 내 수도(속초시)가 이미 강원에 있다
+  const had = provProgress(s, '강원').mine;
   take(s, [one]);
   before.prod = prodOf(s, s.run.regions[one]); before.def = defMul(s, s.run.regions[one]);
   assert.equal(provinceHolder(s.run, '강원'), null);

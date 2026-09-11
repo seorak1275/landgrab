@@ -11,12 +11,18 @@ export const PLAYER = 0, NEUTRAL = -1, OFF = -2; // OFF = 이 판(권역)에 없
 export const ISO_PROD = 0.4, ISO_DEF = 0.8; // 고립(본국과 내 지역으로 이어지지 않음) 지역의 생산·수비 배율
 // 권역 판: 같은 시·군·구 데이터에서 일부만 잘라 쓴다 (지역이 적어 판이 짧고, 특성 분포가 달라 상성이 다르다)
 export const BOARDS = {
-  all:      { name: '전국',      ps: null,                                                      home: '속초시', maxAi: 6, desc: '251개 시·군·구 · 길고 넓은 판' },
-  capital:  { name: '수도권',    ps: ['서울', '인천', '경기'],                                   home: '연천군', maxAi: 3, desc: '서울·인천·경기 79곳 · 🏙도시가 많아 병영·사단 싸움' },
-  yeongnam: { name: '영남',      ps: ['부산', '대구', '울산', '경북', '경남'],                    home: '울진군', maxAi: 3, desc: '부산·대구·울산·경북·경남 75곳 · ⛰산악 수비가 세다' },
-  honam:    { name: '호남·충청', ps: ['광주', '대전', '세종', '충북', '충남', '전북', '전남'],     home: '해남군', maxAi: 3, desc: '광주·대전·세종·충청·전라 77곳 · 🌾평야라 치고받기 쉽다' },
+  // home = 기본 시작 지역. 예전엔 속초시·울진군처럼 어려운 곳이 기본이었다
+  // ("강원도에서 항상 시작하는 건 너무 힘들다") → 기본은 무난한 곳, 어려운 곳은 골라서 가는 재미로
+  all:      { name: '전국',      ps: null,                                                      home: '수원 장안구', desc: '251개 시·군·구 · 길고 넓은 판' },
+  capital:  { name: '수도권',    ps: ['서울', '인천', '경기'],                                   home: '고양 덕양구', desc: '서울·인천·경기 79곳 · 🏙도시가 많아 병영·사단 싸움' },
+  yeongnam: { name: '영남',      ps: ['부산', '대구', '울산', '경북', '경남'],                    home: '창원 의창구', desc: '부산·대구·울산·경북·경남 75곳 · ⛰산악 수비가 세다' },
+  honam:    { name: '호남·충청', ps: ['광주', '대전', '세종', '충북', '충남', '전북', '전남'],     home: '광주 북구', desc: '광주·대전·세종·충청·전라 77곳 · 🌾평야라 치고받기 쉽다' },
 };
 export const DEFAULT_BOARD = 'all';
+// AI 수는 판 크기에서 뽑는다: 지역 45곳당 한 세력(최소 2, 최대 6).
+// 권역 판(75~79곳)에 전국과 같은 4~6세력을 넣었더니 전국보다 3배 빽빽해 보통 난이도에서도 무너졌다
+export const REGIONS_PER_AI = 45;
+export function maxAiFor(board) { return Math.max(2, Math.min(6, Math.round(boardIds(board).length / REGIONS_PER_AI))); }
 // 시작 지역(수도) 후보. 속초는 산악(중립 수비 ×1.5)에 이웃 셋이 전부 군(생산 1)이라 가장 불리하다 —
 // "강원도에서 항상 시작하는 건 너무 힘들다"는 피드백으로 고를 수 있게 했다. 난이도는 봇 실측으로 붙였다
 // tag/desc 는 봇 실측(지옥, 시드 5개 평균 10분 지역 수)으로 붙였다
@@ -183,7 +189,7 @@ export function breakPact(state, betrayer, victim) {
 export function rebelRatio(state, f) { return hasTech(state.run, f, 'agit') ? TECHS.agit.rebel : REBEL_RATIO; }
 
 export const AI_RAMP = 0.1, AI_RAMP_MAX = 1.0;
-export const HOME = '속초시'; // 설악산
+export const HOME = '수원 장안구'; // 기본 시작지(무난한 곳). 속초시(설악산)는 '어려움'으로 목록에 있다
 export const TRUCE = 120; // 시작 뒤 이 시간(초) 동안 AI는 플레이어 지역을 치거나 반란하지 않는다 (첫 배치를 할 틈. 방치를 없앤 뒤 6분 → 2분)
 export const truce = state => (state.run.elapsed || 0) < TRUCE;
 
@@ -211,12 +217,14 @@ export function bfsDist(from, board = null) {
   for (let i = 0; i < q.length; i++) for (const n of neighbors(q[i])) if (d[n] < 0 && (!inBoard || inBoard.has(n))) { d[n] = d[q[i]] + 1; q.push(n); }
   return d;
 }
+export let assignPersonas = () => []; // ai.js 가 채운다 (game ← ai 순환 참조를 피한다)
+export function setPersonaAssigner(fn) { assignPersonas = fn; }
 export function newRun(seed, legacy = {}, perk = null, board = legacy.boardPref || DEFAULT_BOARD, homeName = legacy.homePref || null) {
   const rand = mulberry32(seed);
   const pk = PERKS[perk] || {};
   const up = legacy.upgrades || {};
   const bd = BOARDS[board] ? board : DEFAULT_BOARD, ids = boardIds(bd), inBoard = new Set(ids);
-  const factions = 1 + Math.min(BOARDS[bd].maxAi, Math.max(1, aiCountFor(legacy.prestigeCount || 0) + (pk.aiDelta || 0)));
+  const factions = 1 + Math.min(maxAiFor(bd), Math.max(1, aiCountFor(legacy.prestigeCount || 0) + (pk.aiDelta || 0)));
   const want = homeNames(bd).includes(homeName) ? homeName : BOARDS[bd].home;
   const home = ids.find(i => MAP.regions[i].n === want) ?? ids.find(i => MAP.regions[i].n === BOARDS[bd].home);
   const capitals = [home];
@@ -234,7 +242,7 @@ export function newRun(seed, legacy = {}, perk = null, board = legacy.boardPref 
     return { id, owner: NEUTRAL, def: Math.round((15 + m.prod * 20) * (0.8 + rand() * 0.5) * garrisonMul), div: 0 }; // 구 55·시 45·군 35 안팎
   });
   const pool = Array(factions).fill(100); pool[PLAYER] = 300 + 100 * (up.startGold || 0) + (pk.startGold || 0);
-  const run = { seed, mode: 'region', board: bd, home, factions, regions, pool, capitals, tech: Array.from({ length: factions }, () => ({})), rel: Array.from({ length: factions }, () => Array(factions).fill(0)), pacts: {}, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
+  const run = { seed, mode: 'region', board: bd, home, factions, personas: assignPersonas(seed, factions), regions, pool, capitals, tech: Array.from({ length: factions }, () => ({})), rel: Array.from({ length: factions }, () => Array(factions).fill(0)), pacts: {}, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
   refreshSupply({ legacy, run });
   return run;
 }

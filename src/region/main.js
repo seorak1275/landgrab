@@ -1,6 +1,6 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
-import { runAi } from './ai.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, maxAiFor, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
+import { runAi, PERSONAS, personaOf, factionName } from './ai.js';
 import { draw, pickRegion, bounds, centerOf, regionBox } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
 import { showModal, hideModal, isModalOpen, attachCanvasInput, formatNum, setHint, flashHint, setRatioButtons, SPEEDS, setSpeedButton } from '../ui.js';
@@ -15,7 +15,7 @@ const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60, MAX_ZOOM = 24; // 방치는 없
 const HINT = '내 지역 탭 → 배치 버튼 / 목적지 탭 → 사단 파병 · 남의 지역 탭 → 반란';
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), ctx = canvas.getContext('2d'), cam = createCamera();
-const ownerName = o => (o === NEUTRAL ? '중립' : o === PLAYER ? '나' : `AI ${o}`);
+const ownerName = o => (o === NEUTRAL || o === OFF ? '중립' : o === PLAYER ? '나' : `${factionName(state.run, o)}`);
 
 function save(s = state) { saveTo(s); }
 let state = loadFrom() || newState();
@@ -160,7 +160,7 @@ function mapPickerHtml() {
 const pickedDifficulty = () => { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : state.legacy.difficulty; };
 function boardPickerHtml() {
   const cur = state.legacy.boardPref || state.run.board || DEFAULT_BOARD;
-  return `<p class="sub">판 (권역을 고르면 짧고 빠른 판)</p>` + Object.entries(BOARDS).map(([k, b]) => `<label class="diff-row"><input type="radio" name="board" value="${k}" ${k === cur ? 'checked' : ''}> ${b.name} <span class="desc">${b.desc}${b.maxAi < 6 ? ` · AI 최대 ${b.maxAi}` : ''}</span></label>`).join('')
+  return `<p class="sub">판 (권역을 고르면 짧고 빠른 판)</p>` + Object.entries(BOARDS).map(([k, b]) => `<label class="diff-row"><input type="radio" name="board" value="${k}" ${k === cur ? 'checked' : ''}> ${b.name} <span class="desc">${b.desc} · AI 최대 ${maxAiFor(k)}</span></label>`).join('')
     + `<div id="home-pick">${homePickerHtml(cur)}</div>`;
 }
 const TAG_COLOR = { '쉬움': '#6fe38f', '보통': '#8fd0ff', '어려움': '#ffd479', '도전': '#ff9c9c' };
@@ -211,7 +211,8 @@ function openDiplo(after = hideModal) {
       : peace ? `<button disabled>정전 ${Math.ceil(pactLeft(state, PLAYER, f))}초</button>`
       : cool > 0 ? `<button disabled>거절 ${cool}초</button>`
       : `<button data-action="pact:${f}">정전 제안</button>`;
-    rows.push(`<div class="shop-row"><span class="name" style="color:${ownerColor(f)};opacity:${alive ? 1 : 0.45}">${ownerName(f)}${f === lead && alive ? ' 👑' : ''} <b>${n}곳</b><span class="desc">${alive ? `관계 ${rel > 0 ? '+' : ''}${Math.round(rel)} (${relWord(rel)})${peace ? ' · 🤝 정전 중' : ''}` : '무너진 세력'}${techs ? ` · 기술 ${techs}` : ''}</span></span>${btn}</div>`);
+    const P = personaOf(state.run, f);
+    rows.push(`<div class="shop-row"><span class="name" style="color:${ownerColor(f)};opacity:${alive ? 1 : 0.45}">${ownerName(f)}${f === lead && alive ? ' 👑' : ''} <b>${n}곳</b><span class="desc">${P.name}형 — ${P.desc}<br>${alive ? `관계 ${rel > 0 ? '+' : ''}${Math.round(rel)} (${relWord(rel)})${peace ? ' · 🤝 정전 중' : ''}` : '무너진 세력'}${techs ? ` · 기술 ${techs}` : ''}</span></span>${btn}</div>`);
   }
   const others = [];
   for (let a = 1; a < state.run.factions; a++) for (let b = a + 1; b < state.run.factions; b++) if (atPeace(state, a, b)) others.push(`${ownerName(a)}–${ownerName(b)}`);
@@ -254,7 +255,7 @@ function openStatus(after = hideModal) {
     const n = owned(state, f).length, pct = Math.round(n / total * 100);
     const provs = [...provinceIds(state.run.board || DEFAULT_BOARD).keys()].filter(p => provinceHolder(state.run, p) === f);
     rows.push(`<div class="shop-row"><span class="name" style="color:${ownerColor(f)}">${ownerName(f)} <b>${n}곳 (${pct}%)</b>
-      <span class="desc">인력 ${Math.floor(totalPool(state, f))} · 생산 ${totalProd(state, f).toFixed(0)}/초${provs.length ? ` · ★ ${provs.join(' ')}` : ''}</span>
+      <span class="desc">${f === PLAYER ? '' : `${personaOf(state.run, f).name}형 · `}인력 ${Math.floor(totalPool(state, f))} · 생산 ${totalProd(state, f).toFixed(0)}/초${provs.length ? ` · ★ ${provs.join(' ')}` : ''}</span>
       <span style="display:block;height:6px;margin-top:4px;background:#2a3644;border-radius:3px"><span style="display:block;height:6px;width:${Math.max(2, pct)}%;background:${ownerColor(f)};border-radius:3px"></span></span></span></div>`);
   }
   const provs = [...provinceIds(state.run.board || DEFAULT_BOARD).entries()]
@@ -290,6 +291,7 @@ function openHelp() {
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
     <h3>환생에 남는 것</h3><p>판이 끝나면 전적에 남고, 조건을 채우면 🎖<b>훈장</b>을 받는다. 환생·정복으로 <b>공적</b>이 쌓여 계급(이등병→대장)이 오르고 계급마다 생산이 는다. 환생할 때마다 <b>장군</b>을 한 명 얻어(같은 장군이면 레벨 +1) 그 판에 앞장세운다 — 돌격(공격)·수성(수비)·기동(행군)·조련(생산) 특기에 레벨당 5%. ≡ 메뉴 🎖전적·계급에서 본다. 유산 상점의 상위 4종(보급술·연구소·사절·통솔)은 환생을 몇 번 해야 열린다.</p>
     <h3>끝</h3><p>251개 다 가지면 정복, 지역·사단·반란이 다 없어지면 전멸 → 환생(유산 포인트 → 상점 영구 보너스, 축복 3택1) 후 새 판. 죽어도 다시 하면 된다.</p>
+    <h3>AI 성격</h3><p>세력마다 버릇이 다르다: ${Object.values(PERSONAS).map(p => `${p.icon}<b>${p.name}</b>(${p.desc})`).join(' · ')}. 이름 옆 아이콘이 성격이고, 🤝외교·📊전황에서 확인할 수 있다.</p>
     <h3>AI</h3><p>8초마다 국경엔 방어, 안쪽엔 사단을 만들어 국경으로 보내고, 이길 수 있는 이웃을 치고, 4주기마다 집결, 6주기마다 반란한다. 난이도로 AI 생산 배율을 고른다.</p></div>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
 }
 function openMenu() {

@@ -1,10 +1,34 @@
 // 사단전 AI: 배치(국경 방어/내부 사단) → 공격 → 집결 → 반란 → 내부 사단 국경으로
-import { PLAYER, NEUTRAL, OFF, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, bfsOwn, pathTo, party, truce, TECHS, research, hasTech, techCost, atPeace, proposePact, addRel, leaderOf, relOf } from './game.js';
+import { PLAYER, NEUTRAL, OFF, setPersonaAssigner, owned, adj, allocate, move, rebel, canRebel, effectiveDefense, attackMul, totalPool, rebelRatio, bfsOwn, pathTo, party, truce, TECHS, research, hasTech, techCost, atPeace, proposePact, addRel, leaderOf, relOf } from './game.js';
 import { perkOf } from '../perks.js';
+import { mulberry32 } from '../rng.js';
 
 export function aiPeriod(state) { return 8 * (1 + 0.08 * ((state.legacy.upgrades || {}).aiSlow || 0)) * (perkOf(state).aiSlow || 1); }
 export const GATHER_EVERY = 4, REBEL_EVERY = 6, REBEL_MIN_POOL = 150;
 export const DIPLO_EVERY = 20, TECH_ORDER = ['mobilize', 'drill', 'march', 'agit'], TECH_RESERVE = 150;
+
+// ---- AI 성격: 넷이 똑같이 두면 판이 밋밋하다. 세력마다 다른 버릇을 준다 ----
+// attack = 공격에 필요한 우세(낮을수록 과감) · defRatio = 배치 중 방어 비율 · spend = 풀에서 쓰는 비율
+// rebelEvery = 반란 주기(작을수록 자주) · pact = 정전 성향 · greed = 중립 선호(1이면 중립만 노림)
+export const PERSONAS = {
+  aggressive: { name: '맹공', icon: '🗡', desc: '적은 우세에도 밀고 들어온다',           attack: 1.05, defRatio: 0.3, spend: 0.75, rebelEvery: 8, pact: 0.6, greed: 0.4, tech: 'drill' },
+  defensive:  { name: '요새', icon: '🛡', desc: '방어를 두껍게 쌓고 확실할 때만 친다',    attack: 1.8,  defRatio: 0.7, spend: 0.5,  rebelEvery: 9, pact: 1.3, greed: 0.7, tech: 'mobilize' },
+  expansion:  { name: '개척', icon: '🌱', desc: '중립부터 빠르게 먹어 치운다',            attack: 1.25, defRatio: 0.4, spend: 0.7,  rebelEvery: 10, pact: 1.1, greed: 1.0, tech: 'march' },
+  schemer:    { name: '음모', icon: '✊', desc: '먼 곳에도 반란을 자주 심는다',           attack: 1.4,  defRatio: 0.45, spend: 0.45, rebelEvery: 3, pact: 0.9, greed: 0.5, tech: 'agit' },
+  diplomat:   { name: '중재', icon: '🤝', desc: '정전을 잘 맺고 등 뒤를 비워 둔다',       attack: 1.35, defRatio: 0.5, spend: 0.6,  rebelEvery: 9, pact: 1.8, greed: 0.8, tech: 'mobilize' },
+};
+export const FACTION_NAMES = ['청룡', '백호', '주작', '현무', '황룡', '기린'];
+export const personaOf = (run, f) => (run.personas && run.personas[f]) || { key: 'expansion', ...PERSONAS.expansion };
+export const factionName = (run, f) => (f === PLAYER ? '나' : `${FACTION_NAMES[(f - 1) % FACTION_NAMES.length]}${personaOf(run, f).icon || ''}`);
+// 세력마다 서로 다른 성격을 시드로 나눠 준다 (0번=나는 빈자리)
+setPersonaAssigner((seed, factions) => {
+  const rand = mulberry32((seed ^ 0x27d4eb2f) >>> 0);
+  const keys = Object.keys(PERSONAS);
+  for (let i = keys.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [keys[i], keys[j]] = [keys[j], keys[i]]; }
+  const out = [null];
+  for (let f = 1; f < factions; f++) { const k = keys[(f - 1) % keys.length]; out.push({ key: k, ...PERSONAS[k] }); }
+  return out;
+});
 const pri = owner => (owner === NEUTRAL ? 0 : 1); // 중립 먼저
 
 export function aiAct(state, f) {
@@ -12,33 +36,38 @@ export function aiAct(state, f) {
   const mine = owned(state, f); if (!mine.length) return;
   run.aiTurns = run.aiTurns || []; run.aiTurns[f] = (run.aiTurns[f] || 0) + 1;
   const am = attackMul(state, f);
+  const P = personaOf(run, f);
   const isBorder = r => adj(run, r.id).some(n => run.regions[n].owner !== f);
   const othersBattle = r => r.battle && !party(r, f);
   const offLimits = r => (truce(state) && r.owner === PLAYER) || atPeace(state, f, r.owner); // 초반 휴전 · 정전 중인 상대
 
   // 0. 연구: 인력이 넉넉하면 순서대로 하나씩 (남는 인력이 있어야 배치도 하니 TECH_RESERVE는 남긴다)
-  for (const key of TECH_ORDER) {
+  for (const key of [P.tech, ...TECH_ORDER]) { // 성격이 좋아하는 기술부터
     if (hasTech(run, f, key)) continue;
     if (run.pool[f] >= techCost(state, f, key) + TECH_RESERVE) research(state, f, key);
     break;
   }
 
   // 0. 반란 (REBEL_EVERY 주기마다, 배치 전에): 풀 합이 넉넉하면 플레이어(없으면 가장 약한 세력) 지역 중 수비가 가장 약한 곳에
-  if (run.aiTurns[f] % REBEL_EVERY === 0 && totalPool(state, f) >= REBEL_MIN_POOL) {
+  if (run.aiTurns[f] % (P.rebelEvery || REBEL_EVERY) === 0 && totalPool(state, f) >= REBEL_MIN_POOL) {
     const targets = run.regions.filter(r => r.owner !== f && r.owner !== NEUTRAL && r.owner !== OFF && !offLimits(r) && canRebel(state, f, r.id) && !r.battle)
       .sort((a, b) => (a.owner === PLAYER ? 0 : 1) - (b.owner === PLAYER ? 0 : 1) || (a.def + a.div) - (b.def + b.div));
-    const t = targets[0];
-    if (t) { const n = Math.min(300, Math.floor(totalPool(state, f) * 0.5)); if (n * 0.7 * am > effectiveDefense(state, t, f) * 1.2) rebel(state, f, t.id, n); }
+    // 후보를 하나만 보면 그게 비쌀 때 반란을 아예 안 하게 된다 → 될 때까지 앞에서 몇 곳 훑는다
+    const n = Math.min(300, Math.floor(totalPool(state, f) * 0.5));
+    for (const t of targets.slice(0, 6)) {
+      if (n * rebelRatio(state, f) * am > effectiveDefense(state, t, f) * 1.2) { rebel(state, f, t.id, n); break; }
+    }
   }
 
   // 1. 배치: 세력 풀의 60%만 쓴다(나머지는 반란 자금). 절반은 방어가 약한 국경 지역(최대 5곳)에 방어, 절반은 사단이 가장 큰 국경 지역(없으면 수도)에 사단
-  const spend = Math.floor(run.pool[f] * 0.6);
+  const spend = Math.floor(run.pool[f] * (P.spend || 0.6));
   if (spend >= 10) {
     const border = mine.filter(isBorder).sort((a, b) => a.def - b.def);
     const defTargets = border.slice(0, 5);
-    if (defTargets.length) { const each = Math.floor(spend * 0.5 / defTargets.length); for (const r of defTargets) allocate(state, r.id, 'def', each); }
+    const dr = P.defRatio === undefined ? 0.5 : P.defRatio;
+    if (defTargets.length) { const each = Math.floor(spend * dr / defTargets.length); for (const r of defTargets) allocate(state, r.id, 'def', each); }
     const divAt = (border.length ? border.reduce((a, b) => (b.div > a.div ? b : a)) : mine[0]);
-    allocate(state, divAt.id, 'div', Math.floor(spend * 0.5));
+    allocate(state, divAt.id, 'div', Math.floor(spend * (1 - dr)));
   }
 
   // 2. 공격: 사단×공격 > 상대 수비×1.3 인 가장 약한 이웃(중립 먼저), 주기당 3회, 80%
@@ -49,15 +78,16 @@ export function aiAct(state, f) {
     for (const n of adj(run, r.id)) {
       const t = run.regions[n]; if (t.owner === f || othersBattle(t) || offLimits(t)) continue;
       const D = effectiveDefense(state, t, f);
-      if (r.div * 0.8 * am > D * 1.3) options.push({ r, t, D });
+      if (r.div * 0.8 * am > D * (P.attack || 1.3)) options.push({ r, t, D });
     }
   }
-  options.sort((a, b) => pri(a.t.owner) - pri(b.t.owner) || a.D - b.D);
+  const g = P.greed === undefined ? 0.7 : P.greed;
+  options.sort((a, b) => (pri(a.t.owner) - pri(b.t.owner)) * g - 0 || a.D - b.D);
   const hit = new Set();
   for (const o of options) {
     if (attacks >= 3) break;
     if (hit.has(o.t.id) || o.t.owner === f) continue;
-    if (!(o.r.div * 0.8 * am > effectiveDefense(state, o.t, f) * 1.3)) continue;
+    if (!(o.r.div * 0.8 * am > effectiveDefense(state, o.t, f) * (P.attack || 1.3))) continue;
     if (move(state, o.r.id, o.t.id, 0.8).type !== 'invalid') { attacks++; hit.add(o.t.id); }
   }
 
@@ -95,10 +125,10 @@ export function diplomacy(state) {
     if (leadN > owned(state, f).length * 1.2) addRel(state, f, lead, -4); // 커질수록 미움을 산다
     for (let g = 1; g < run.factions; g++) {
       if (g === f || g === lead || atPeace(state, f, g)) continue;
-      if (leadN > owned(state, f).length * 1.3) proposePact(state, f, g);
+      if (leadN > owned(state, f).length * (1.6 - 0.3 * (personaOf(run, f).pact || 1))) proposePact(state, f, g);
     }
     // 선두에게 얻어맞는 중이면 플레이어에게도 손을 내민다 (플레이어가 선두가 아니고 사이가 나쁘지 않을 때)
-    if (lead !== PLAYER && f !== PLAYER && !atPeace(state, f, PLAYER) && relOf(state, f, PLAYER) >= 0 && leadN > owned(state, f).length * 1.5) proposePact(state, f, PLAYER);
+    if (lead !== PLAYER && f !== PLAYER && !atPeace(state, f, PLAYER) && relOf(state, f, PLAYER) >= 0 && leadN > owned(state, f).length * (1.8 - 0.3 * (personaOf(run, f).pact || 1))) proposePact(state, f, PLAYER);
   }
 }
 
