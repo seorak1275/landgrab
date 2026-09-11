@@ -216,6 +216,23 @@ export function allocate(state, id, kind, n) {
   return a;
 }
 
+// 원터치 국경 배치: 풀을 다 써서 방어가 약한 국경 3곳에 40%, 사단이 가장 큰 국경 지역(선봉)에 60%.
+// 지역이 251개나 되니 손으로 다 누르기 어렵다는 문제를 푼다 (AI·봇이 하던 것과 같은 규칙)
+export function autoDeploy(state, f = PLAYER) {
+  const run = state.run, mine = owned(state, f);
+  if (!mine.length) return 0;
+  const pool = Math.floor(run.pool[f] || 0); if (pool < 10) return 0;
+  const border = mine.filter(r => adj(run, r.id).some(n => run.regions[n].owner !== f));
+  const spots = (border.length ? border : mine);
+  const weak = [...spots].sort((a, b) => (a.def + a.div) - (b.def + b.div)).slice(0, 3);
+  let used = 0;
+  const each = Math.floor(pool * 0.4 / weak.length);
+  for (const r of weak) used += allocate(state, r.id, 'def', each);
+  const spear = spots.reduce((a, b) => (b.div > a.div ? b : a));
+  used += allocate(state, spear.id, 'div', 'max');
+  return used;
+}
+
 // ---- 전투 (규칙은 sim.js와 같은 등속 소모, 편 = {owner, size, am}) ----
 export function battleRate(total) { return 3 + 0.5 * Math.sqrt(total); }
 function defense(state, r) { return (r.def + r.div) * defMul(state, r); }

@@ -60,6 +60,10 @@ export async function run(h) {
   await h.shot(`${SP}/r4_capital_board.png`);
   // 고립 표시: 내 지역 하나를 멀리 떨어뜨려 본다
   say('isolated', await h.eval(`(async () => { const { refreshSupply, boardIds, adj } = await import('./src/region/game.js'); const run = __game.state.run; const ids = boardIds('capital'); const far = ids.find(i => run.regions[i].owner === -1 && !adj(run, i).some(n => run.regions[n].owner === 0)); run.regions[far].owner = 0; refreshSupply(__game.state); return 'far=' + far + ' iso=' + run.regions[far].iso + ' panelReady=' + !!document.getElementById('p-stats'); })()`));
+  // ⚡ 국경 배치
+  await h.eval(`__game.state.run.pool[0] = 400`); await h.wait(200);
+  await h.eval(`document.getElementById('btn-auto').click()`); await h.wait(200);
+  say('auto deploy', await h.eval(`document.getElementById('hint').textContent + ' | pool=' + Math.floor(__game.state.run.pool[0]) + ' top=' + document.getElementById('top-pool').textContent`));
   // 연구·외교 창
   await h.eval(`__game.state.run.pool[0] = 500`); await h.wait(200);
   await h.eval(`document.getElementById('btn-tech').click()`); await h.wait(200);

@@ -108,3 +108,20 @@ test('권역 판에서도 AI가 돌고 10분이면 중립이 줄어든다', () =
   assert.ok(owned(s, NEUTRAL).length < before);
   assert.ok(s.run.regions.every(r => r.owner !== OFF || (r.def === 0 && r.div === 0)));
 });
+
+test('원터치 국경 배치: 인력을 국경 지역의 방어와 선봉 사단에 나눠 넣는다', async () => {
+  const g = await import('../src/region/game.js');
+  const s = mk(9);
+  const home = cap(s, PLAYER);
+  // 내 지역 3곳 (하나는 안쪽)
+  const a = g.adj(s.run, home.id)[0], b = g.adj(s.run, home.id)[1];
+  s.run.regions[a].owner = PLAYER; s.run.regions[b].owner = PLAYER;
+  s.run.pool[PLAYER] = 300;
+  const moved = g.autoDeploy(s, PLAYER);
+  assert.ok(moved >= 290, `배치 ${moved}`);
+  assert.ok(s.run.pool[PLAYER] < 10, '인력을 거의 다 쓴다');
+  const mine = owned(s, PLAYER);
+  assert.ok(mine.some(r => r.div > 100), '선봉에 사단');
+  assert.ok(mine.filter(r => r.def > 60).length >= 1, '국경에 방어');
+  assert.equal(g.autoDeploy(s, PLAYER), 0, '인력이 없으면 0');
+});

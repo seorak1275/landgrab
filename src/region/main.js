@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub, TECHS, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, TECHS, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi } from './ai.js';
 import { draw, pickRegion, bounds, centerOf } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -47,7 +47,9 @@ function setText(id, t) { if (lastText.get(id) !== t) { lastText.set(id, t); $(i
 function showRow(id, on) { const el = $(id); if (el.hidden === on) el.hidden = !on; }
 function refresh() {
   if (sel !== null && state.run.regions[sel].owner !== PLAYER) sel = null;
-  setText('top-pool', `👥 ${formatNum(totalPool(state, PLAYER))}/${Math.floor(poolCap(state, PLAYER))} (+${totalProd(state, PLAYER).toFixed(1)}/초)`);
+  const pool = totalPool(state, PLAYER), cap = Math.floor(poolCap(state, PLAYER)), full = pool >= cap - 1;
+  setText('top-pool', `👥 ${formatNum(pool)}/${cap}${full ? ' ⚠넘침' : ''} (+${totalProd(state, PLAYER).toFixed(1)}/초)`);
+  $('top-pool').style.color = full ? '#ffd479' : '';
   setText('top-regions', `🏳 ${owned(state, PLAYER).length}/${activeCount(state)}`);
   setText('top-prestige', `환생 ${state.legacy.prestigeCount}`);
   setText('btn-tech', `🔬 연구 ${techCount(state.run, PLAYER)}/${Object.keys(TECHS).length}`);
@@ -159,7 +161,7 @@ function openDiplo(after = hideModal) {
 }
 function openHelp() {
   showModal({ title: '📖 사단전 도움말', html: `<div class="help">
-    <h3>지역과 인력</h3><p>대한민국 251개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 2·시 1.5·군 1/초)이 <b>하나의 인력 풀</b>(상단 👥, 최대 500)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려지니 계속 배치하자.</p>
+    <h3>지역과 인력</h3><p>대한민국 251개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 2·시 1.5·군 1/초)이 <b>하나의 인력 풀</b>(상단 👥, 최대 500)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려진다(상단에 ⚠넘침). 패널의 ⚡<b>국경 배치</b>를 누르면 인력을 국경 방어 3곳(40%)과 선봉 사단(60%)에 한 번에 넣는다.</p>
     <h3>방어 배치 · 사단</h3><p>풀에서 🛡<b>방어인력</b>(그 지역 고정 수비)이나 ⚔<b>사단</b>(움직이는 부대, 지역당 하나, 인원 무제한)으로 옮긴다. +10/+100/+500/최대.</p>
     <h3>파병</h3><p>내 지역 선택 → <b>인접한</b> 지역 탭. 파병 비율(25/50/100%)만큼 사단이 행군(2초)해 내 지역이면 합류, 남의 지역이면 전투. 선택하면 인접 지역이 밝아진다(✓이김/✕짐). 먼 곳은 반란으로.</p>
     <h3>반란</h3><p>남이 가진 지역을 탭 → ✊반란 10/100/500/최대. 내 모든 풀에서 빠지고 10초 뒤 70%가 그 지역 안에서 봉기해 방어+사단과 싸운다. 인접할 필요 없음. AI도 똑같이 한다.</p>
@@ -255,6 +257,7 @@ function init() {
   document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => onAct(b.dataset.act, b.dataset.n)));
   document.querySelectorAll('.ratio-btn').forEach(b => b.addEventListener('click', () => { state.run.sendRatio = Number(b.dataset.r); setRatioButtons(state.run.sendRatio); }));
   $('btn-menu').addEventListener('click', openMenu);
+  $('btn-auto').addEventListener('click', () => { const n = autoDeploy(state, PLAYER); flashHint(n ? `⚡ 인력 ${n}명을 국경 방어와 선봉 사단에 배치했습니다` : '배치할 인력이 없습니다'); save(); refresh(); });
   $('btn-tech').addEventListener('click', () => openTech());
   $('btn-diplo').addEventListener('click', () => openDiplo());
   $('btn-center').addEventListener('click', fitAll);
