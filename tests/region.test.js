@@ -1,7 +1,7 @@
 // 사단전 모드: 지도 데이터, 규칙, AI, 밸런스
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP, PLAYER, NEUTRAL, POOL_CAP, REBEL_DELAY, REBEL_RATIO, newRun, tick, status, owned, TRUCE, totalPool, totalProd, allocate, move, rebel, canRebel, predict, runArmies, runBattles, resolveBattle, runRebels, bfsDist, neighbors, prodOf, poolCap, defMul, party, effectiveDefense, setListener } from '../src/region/game.js';
+import { MAP, PLAYER, NEUTRAL, POOL_CAP, CAP_PER_REGION, REBEL_DELAY, REBEL_RATIO, newRun, tick, status, owned, TRUCE, totalPool, totalProd, allocate, move, rebel, canRebel, predict, runArmies, runBattles, resolveBattle, runRebels, bfsDist, neighbors, prodOf, poolCap, defMul, party, effectiveDefense, setListener } from '../src/region/game.js';
 import { runAi, aiAct, aiPeriod, GATHER_EVERY, REBEL_EVERY } from '../src/region/ai.js';
 import { greedyStep, BOT_EVERY } from '../tools/region_bot.mjs';
 
@@ -39,11 +39,11 @@ test('생산: 세력 풀 하나에 모든 지역 생산이 모이고 한도 500,
   near(totalProd(s, PLAYER), 1.5 + MAP.regions[n.id].prod);
   tick(s, 10); near(s.run.pool[PLAYER], 315 + 15 + MAP.regions[n.id].prod * 10);
   n.battle = { parties: [{ owner: 1, size: 5, am: 1 }], rate: 5 }; near(totalProd(s, PLAYER), 1.5); delete n.battle;
-  tick(s, 100000); near(s.run.pool[PLAYER], POOL_CAP);
+  tick(s, 100000); near(s.run.pool[PLAYER], POOL_CAP + CAP_PER_REGION * 2); // 한도 = 500 + 지역당 2 (지금 내 지역 2곳)
   assert.equal(totalPool(s, NEUTRAL), 0);
   const f = mk(); const ai = cap(f, 1); near(prodOf(f, ai), MAP.regions[ai.id].prod * 0.8); // 보통 난이도, 시작 직후(램프 0)
   near(prodOf(s, cap(s, 1)), MAP.regions[cap(s, 1).id].prod * 1.8); // 오래 지나면 램프 상한 +1.0
-  s.legacy.upgrades.capBonus = 2; near(poolCap(s, PLAYER), 600); near(poolCap(s, 1), 500);
+  s.legacy.upgrades.capBonus = 2; near(poolCap(s, PLAYER), (POOL_CAP + CAP_PER_REGION * 2) * 1.2); near(poolCap(s, 1), POOL_CAP + CAP_PER_REGION * owned(s, 1).length);
 });
 
 test('배치: 풀 → 방어/사단, 10·100·500·최대, 부족하면 있는 만큼, 중립·1 미만은 0', () => {

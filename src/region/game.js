@@ -28,7 +28,7 @@ export function boardIds(key = DEFAULT_BOARD) {
 export function boardOf(state) { return BOARDS[state.run.board] || BOARDS[DEFAULT_BOARD]; }
 // 이 판에 있는 이웃만 (권역 판에서 바깥으로는 못 나간다)
 export function adj(run, id) { return MAP.regions[id].adj.filter(n => run.regions[n].owner !== OFF); }
-export const POOL_CAP = 500;
+export const POOL_CAP = 500, CAP_PER_REGION = 2; // 풀 한도 = 500 + 지역당 2 (전국 251곳이면 1000). 고정 500이면 후반에 생산 대부분이 버려져 판이 안 끝났다
 export const REGION_SPEED = 0.5; // 지역/초 (한 지역 건너는 데 2초)
 export const REBEL_DELAY = 10, REBEL_RATIO = 0.7;
 export const AMOUNTS = [10, 100, 500, 'max'];
@@ -128,7 +128,7 @@ export function aiMul(state) { return difficultyOf(state).mul + 0.1 * state.lega
 export function prodMul(state, f) { const base = f === PLAYER ? (1 + 0.1 * lv(state, 'gold') + 0.1 * lv(state, 'soldiers')) * (perkOf(state).gold || 1) * (perkOf(state).soldiers || 1) * rankBonus(state.legacy) * gen(state, 'prod') : aiMul(state); return base * techMul(state.run, f, 'prod'); }
 export function attackMul(state, f) { return (f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) * gen(state, 'attack') : 1) * techMul(state.run, f, 'attack'); }
 export function defMul(state, r) { const base = (TRAIT_DEF[MAP.regions[r.id].tr] || 1) * (r.iso ? isoDef(state, r.owner) : 1); return r.owner === PLAYER ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) * gen(state, 'def') : base; }
-export function poolCap(state, f) { return POOL_CAP * (f === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1); }
+export function poolCap(state, f) { return (POOL_CAP + CAP_PER_REGION * owned(state, f).length) * (f === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1); }
 export function speedOf(state, f) { return (f === PLAYER ? REGION_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) * gen(state, 'speed') : REGION_SPEED) * techMul(state.run, f, 'speed'); }
 export function prodOf(state, r) { return MAP.regions[r.id].prod * prodMul(state, r.owner) * (r.iso ? isoProd(state, r.owner) : 1); }
 export function aiCountFor(prestige) { return Math.min(4 + Math.floor(prestige / 3), 6); }
