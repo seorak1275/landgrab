@@ -45,7 +45,7 @@ export async function run(h) {
   say('shop rows', await h.eval(`document.querySelectorAll('.shop-row').length + ' ' + document.getElementById('modal-title').textContent`));
   await h.shot(`${SP}/s3_shop.png`);
   await h.eval(`document.querySelector('#modal-actions button').click()`);
-  // 저장 후 1시간 전으로 조작 → 오프라인 정산
+  // 저장 후 1시간 전으로 조작 → 방치는 없으니 "멈춰 있었다" 안내만 뜨고 판은 그대로여야 한다
   await h.wait(1200);
   // 페이지를 떠날 때 pagehide 저장이 덮어쓰지 않도록, 조작 뒤 이 페이지의 setItem을 막는다
   await h.eval(`(() => { const s = JSON.parse(localStorage['landgrab.save.v1']); s.lastSave = Date.now() - 3600e3; delete s.legacy.seenFeatures; localStorage['landgrab.save.v1'] = JSON.stringify(s); localStorage.setItem = () => {}; })()`);
@@ -53,11 +53,9 @@ export async function run(h) {
   say('welcome modal', await h.eval(`document.getElementById('modal-title').textContent + ' seen=' + __game.state.legacy.seenFeatures`));
   await h.shot(`${SP}/s3b_welcome.png`);
   await h.eval(`[...document.querySelectorAll('#modal-actions button')].find(b => b.textContent === '계속하기').click()`); await h.wait(300);
-  say('offline modal', await h.eval(`document.getElementById('modal-title').textContent + ' / ' + document.getElementById('modal-body').innerText.replace(/\\n/g, ' ')`));
-  await h.shot(`${SP}/s4_offline.png`);
-  await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300);
-  say('after offline confirm', await h.eval(`document.getElementById('modal').hidden ? 'playing' : document.getElementById('modal-title').textContent`));
-  if (!(await h.eval(`document.getElementById('modal').hidden`))) { await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); }
+  say('pause hint', await h.eval(`document.getElementById('hint').textContent + ' / tiles=' + __game.state.run.tiles.filter(t => t.owner === 0).length`));
+  await h.shot(`${SP}/s4_pause.png`);
+  if (!(await h.eval(`document.getElementById('modal').hidden`))) { await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(300); }
   // 원거리·다중 명령: 수도에서 한 줄로 3칸을 내 땅으로 만들고, 수도+1칸을 골라 끝의 중립 타일을 공격
   const far = JSON.parse(await h.eval(`(() => { const run = __game.state.run, dirs = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
     const at = (q, r) => run.tiles.find(t => t.q === q && t.r === r);

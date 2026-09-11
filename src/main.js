@@ -2,7 +2,6 @@ import { PLAYER, TERRAIN } from './world.js';
 import { tick, upgrade, status, factionGoldRate, dispatch, previewTargets, setSendListener, setBuilding, BUILDINGS, TRAITS } from './sim.js';
 import { PERKS, offerPerks } from './perks.js';
 import { runAi } from './ai.js';
-import { simulateOffline } from './offline.js';
 import { LEGACY_ITEMS, itemCost, buy, pointsFor, rebirth, restartOn } from './prestige.js';
 import { newState, save, load, serialize, deserialize, SAVE_KEY, FEATURES } from './save.js';
 import { createCamera, draw, pickTile, loadAssets, worldBounds, FACTION_COLORS, ownerColor, setColorblind } from './render.js';
@@ -10,7 +9,7 @@ import { MAPS, DEFAULT_MAP } from './mapgen.js';
 import { regionHolders, DIFFICULTIES, DEFAULT_DIFFICULTY, difficultyOf } from './sim.js';
 import { updateTop, updatePanel, upgradePlan, setRatioButtons, setHint, flashHint, bindButtons, showModal, hideModal, isModalOpen, attachCanvasInput, formatNum, SPEEDS, setSpeedButton } from './ui.js';
 
-const TICK = 0.25, AUTOSAVE = 5, RESUME_MIN = 30;
+const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60; // 방치(오프라인 정산)는 없다 — 꺼둔 동안 세상이 멈춘다
 const HINT_DEFAULT = '내 땅 탭 → 목적지 탭 (이어진 먼 땅도 됨). ✓ 이김 ✕ 짐';
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
@@ -91,8 +90,8 @@ function openHelp(section = null) {
     <h3>지형</h3><table>${Object.entries(TERRAIN).map(([k, t]) => `<tr><td>${t.name}</td><td>골드 ×${t.gold} · 방어 +${Math.round(t.def * 100)}% · 한도 ×${t.cap}</td></tr>`).join('')}</table>
     <h3>지역</h3><p>대한민국(시·도)·서울(구) 지도에서 한 지역의 땅을 전부 가지면 그 지역 생산 +50%(2칸 이상인 지역만). 이름표가 ★와 주인 색으로 바뀐다. 섬은 뱃길로 이어진다.</p>
     <h3>AI·난이도</h3><p>AI는 8초마다 업그레이드·공격·보강하고 4주기마다 땅 전체에서 병사를 모아 집결 공격한다. 난이도(쉬움 0.6 / 보통 0.8 / 어려움 1.0 / 지옥 1.2)는 AI 생산 배율, 유산 포인트도 ×1~2. 환생마다 +0.1, 판이 10분 지날 때마다 +0.1(최대 +1.0)씩 세진다.</p>
-    <h3>환생·유산·축복</h3><p>지도를 다 먹거나(정복) 다 잃으면(전멸, 강제) 환생. 유산 포인트로 상점의 영구 보너스 15종을 사고, 환생 때 축복 3개 중 하나를 골라 그 판에 쓴다. 지도·난이도도 그때 고른다. 꺼둔 시간(최대 8시간+유산)은 나·AI 모두 시뮬된다.</p>
-    <h3>기타</h3><p>▶×1 버튼으로 배속(×1/×2/×4, 오프라인 정산엔 영향 없음). 메뉴에 색약 모드, 저장 내보내기/가져오기.</p>`;
+    <h3>환생·유산·축복</h3><p>지도를 다 먹거나(정복) 다 잃으면(전멸, 강제) 환생. 유산 포인트로 상점의 영구 보너스 15종을 사고, 환생 때 축복 3개 중 하나를 골라 그 판에 쓴다. 지도·난이도도 그때 고른다. <b>방치는 없다</b> — 창을 닫으면 시간이 멈추고 돌아오면 나가던 그 상황 그대로다.</p>
+    <h3>기타</h3><p>▶×1 버튼으로 배속(×1/×2/×4). 메뉴에 색약 모드, 저장 내보내기/가져오기.</p>`;
   showModal({ title: '📖 도움말', html: `<div class="help">${section === 'build' ? build + rest : rest + build}</div>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
 }
 
@@ -104,7 +103,8 @@ function showWelcome(then) {
       <li><b>대한민국·서울 지도</b> — 시·도/구를 전부 가지면 생산 +50%, 지역마다 특성(산악·평야·도시·해안)</li>
       <li><b>행군 전투</b> — 병사가 실제로 이동하고, 마주치면 야전, 셋 이상이면 난전. 전투 시간은 전력에 따라</li>
       <li><b>특화 건물</b> — 농장·병영·성벽·망루(자동 공격). 자리에 맞으면 효과 ×1.5</li>
-      <li><b>난이도·축복·유산 15종</b> — AI도 집결 공격을 합니다. 병사 한도 3배</li>
+      <li><b>난이도·축복·유산</b> — AI도 집결 공격을 합니다. 병사 한도 3배</li>
+      <li><b>방치 없음</b> — 창을 닫으면 시간이 멈춥니다. 돌아오면 나가던 그 상황 그대로. 유산 '오프라인 한도'에 쓴 포인트는 돌려드렸습니다</li>
     </ul><p>지금 판(${(MAPS[state.run.map] || MAPS.hex).name})을 이어서 해도 되고, 새 지도에서 새로 시작해도 됩니다(유산·환생 기록은 유지).</p>`,
     actions: [
       { label: '새 지도로 시작', onClick: () => { hideModal(); openMapChange(then); } },
@@ -218,19 +218,11 @@ function checkEnd() {
   });
 }
 
-// 꺼둔 시간(새로 열었을 때·백그라운드에서 돌아왔을 때) 정산
-function settle(elapsedSec) {
-  if (ended || elapsedSec < RESUME_MIN) return;
-  effects = [];
-  const r = simulateOffline(state, elapsedSec);
-  effects = []; growth.clear(); // 시뮬 중 쌓인 연출은 버리고, 정산분이 "+N"으로 뜨지 않게
-  save(state);
-  ended = true; // 정산 창을 읽는 동안 멈춤 (전멸했어도 확인을 누른 뒤에 전멸 창이 뜨게)
-  const diff = r.tilesAfter - r.tilesBefore;
-  showModal({ title: '돌아오셨군요', html: `<p>꺼둔 시간 ${hms(r.seconds)} 동안</p><p>골드 +${formatNum(r.goldGained)}</p><p>땅 ${r.tilesBefore} → ${r.tilesAfter} (${diff >= 0 ? '+' : ''}${diff})</p>${r.outcome === 'wiped' ? '<p>…그리고 모든 땅을 잃었습니다.</p>' : ''}`,
-    actions: [{ label: '확인', primary: true, onClick: () => { hideModal(); ended = false; last = performance.now(); checkEnd(); } }] });
+// 꺼둔 시간은 정산하지 않는다 (2026-09-11 "방치는 없는걸로"): 나가던 그 상황에서 그대로 이어 하고, 멈춰 있었다고만 알린다
+function notePause(elapsedSec) {
+  if (elapsedSec < PAUSE_MIN) return;
+  flashHint(`⏸ 꺼둔 ${hms(elapsedSec)} 동안 멈춰 있었습니다 (방치로는 아무 일도 일어나지 않습니다)`, 5000);
 }
-
 function loop(now) {
   const dt = Math.min(1, (now - last) / 1000); last = now;
   if (!ended) {
@@ -274,7 +266,7 @@ async function init() {
     },
     onCenter: centerOnCapital,
     onHelp: openHelp,
-    onSpeed: () => { const i = SPEEDS.indexOf(state.legacy.speed || 1); state.legacy.speed = SPEEDS[(i + 1) % SPEEDS.length]; setSpeedButton(state.legacy.speed); save(state); flashHint(`배속 ×${state.legacy.speed} (오프라인 정산엔 영향 없음)`); },
+    onSpeed: () => { const i = SPEEDS.indexOf(state.legacy.speed || 1); state.legacy.speed = SPEEDS[(i + 1) % SPEEDS.length]; setSpeedButton(state.legacy.speed); save(state); flashHint(`배속 ×${state.legacy.speed}`); },
   });
   attachCanvasInput(canvas, cam, { onTap, isSelectMode: () => multi, onDrag: (sx, sy) => {
     // 드래그 선택: 지나가는 내 땅을 추가 (빼는 건 탭)
@@ -283,13 +275,13 @@ async function init() {
   } });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { hiddenAt = Date.now(); save(state); return; }
-    // 아이폰 홈화면 앱은 다시 열어도 새로 로드되지 않는다 → 백그라운드에 있던 시간도 정산
-    if (hiddenAt) { const elapsed = (Date.now() - hiddenAt) / 1000; hiddenAt = 0; last = performance.now(); acc = 0; if (!isModalOpen()) settle(elapsed); }
+    // 아이폰 홈화면 앱은 다시 열어도 새로 로드되지 않는다 → 돌아온 시점부터 이어서 돈다
+    if (hiddenAt) { const elapsed = (Date.now() - hiddenAt) / 1000; hiddenAt = 0; last = performance.now(); acc = 0; if (!isModalOpen()) notePause(elapsed); }
   });
   window.addEventListener('pagehide', () => save(state));
   // 꺼둔 시간은 안내 창이 저장(lastSave 갱신)하기 전에 재둔다
   const away = state.lastSave > 0 ? (Date.now() - state.lastSave) / 1000 : 0;
-  const resume = () => { if (away > 0) settle(away); };
+  const resume = () => notePause(away);
   if (state.lastSave > 0 && (state.legacy.seenFeatures || 0) < FEATURES) showWelcome(resume); else resume();
   requestAnimationFrame(loop);
 }

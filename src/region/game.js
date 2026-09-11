@@ -15,7 +15,7 @@ export const TRAIT_DEF = { mountain: 1.5, city: 1.2, coast: 1.0, plain: 0.9 };
 export const TRAIT_NAME = { mountain: '⛰산악', city: '🏙도시', coast: '🌊해안', plain: '🌾평야' };
 export const AI_RAMP = 0.1, AI_RAMP_MAX = 1.0;
 export const HOME = '속초시'; // 설악산
-export const TRUCE = 360; // 시작 뒤 이 시간(초) 동안 AI는 플레이어 지역을 치거나 반란하지 않는다 (생산 4배 뒤로 6분 만에 전멸해서)
+export const TRUCE = 120; // 시작 뒤 이 시간(초) 동안 AI는 플레이어 지역을 치거나 반란하지 않는다 (첫 배치를 할 틈. 방치를 없앤 뒤 6분 → 2분)
 export const truce = state => (state.run.elapsed || 0) < TRUCE;
 
 const lv = (state, k) => (state.legacy && state.legacy.upgrades && state.legacy.upgrades[k]) || 0;

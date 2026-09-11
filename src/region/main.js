@@ -5,23 +5,18 @@ import { draw, pickRegion, bounds, centerOf } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
 import { showModal, hideModal, isModalOpen, attachCanvasInput, formatNum, setHint, flashHint, setRatioButtons, SPEEDS, setSpeedButton } from '../ui.js';
 import { LEGACY_ITEMS, itemCost, buy } from '../prestige.js';
+import { SAVE_KEY, newState, save as saveTo, load as loadFrom } from './save.js';
 import { DIFFICULTIES, DEFAULT_DIFFICULTY } from '../sim.js';
 import { PERKS, offerPerks } from '../perks.js';
 
-const SAVE_KEY = 'landgrab.region.v1', VERSION = 1, TICK = 0.25, AUTOSAVE = 5, RESUME_MIN = 30;
+const TICK = 0.25, AUTOSAVE = 5, PAUSE_MIN = 60; // 방치는 없다 — 꺼둔 동안 세상이 멈춘다
 const HINT = '내 지역 탭 → 배치 버튼 / 목적지 탭 → 사단 파병 · 남의 지역 탭 → 반란';
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), ctx = canvas.getContext('2d'), cam = createCamera();
 const ownerName = o => (o === NEUTRAL ? '중립' : o === PLAYER ? '나' : `AI ${o}`);
 
-function newState(seed = Date.now() >>> 0) {
-  const upgrades = {}; for (const k of Object.keys(LEGACY_ITEMS)) upgrades[k] = 0;
-  const legacy = { points: 0, prestigeCount: 0, upgrades, difficulty: 'hell', speed: 1 }; // 사단전은 기본이 최고 난이도 ("AI는 항상 엄청 강하게")
-  return { version: VERSION, legacy, run: newRun(seed, legacy), lastSave: 0 };
-}
-function save(s = state) { try { s.lastSave = Date.now(); localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch {} }
-function load() { try { const t = localStorage.getItem(SAVE_KEY); if (!t) return null; const o = JSON.parse(t); return o && o.run && o.run.mode === 'region' && o.version === VERSION ? o : null; } catch { return null; } }
-let state = load() || newState();
+function save(s = state) { saveTo(s); }
+let state = loadFrom() || newState();
 let W = 0, H = 0, acc = 0, saveAcc = 0, last = performance.now(), ended = false, hiddenAt = 0, effects = [];
 let sel = null, inspect = null;
 window.__game = { get state() { return state; }, cam, get sel() { return sel; } };
@@ -116,12 +111,12 @@ function openShop(after = hideModal) {
 }
 function openHelp() {
   showModal({ title: '📖 사단전 도움말', html: `<div class="help">
-    <h3>지역과 인력</h3><p>대한민국 230개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 0.5·시 0.4·군 0.25/초)이 <b>하나의 인력 풀</b>(상단 👥, 최대 500)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려지니 계속 배치하자.</p>
+    <h3>지역과 인력</h3><p>대한민국 251개 시·군·구가 칸이다. 내 모든 지역의 생산력(구 2·시 1.5·군 1/초)이 <b>하나의 인력 풀</b>(상단 👥, 최대 500)에 모이고, 어느 내 지역에서든 그 풀에서 배치한다. 지역이 많을수록 빨리 찬다(전투 중인 지역은 생산 중지). 한도까지 차면 생산이 버려지니 계속 배치하자.</p>
     <h3>방어 배치 · 사단</h3><p>풀에서 🛡<b>방어인력</b>(그 지역 고정 수비)이나 ⚔<b>사단</b>(움직이는 부대, 지역당 하나, 인원 무제한)으로 옮긴다. +10/+100/+500/최대.</p>
     <h3>파병</h3><p>내 지역 선택 → <b>인접한</b> 지역 탭. 파병 비율(25/50/100%)만큼 사단이 행군(2초)해 내 지역이면 합류, 남의 지역이면 전투. 선택하면 인접 지역이 밝아진다(✓이김/✕짐). 먼 곳은 반란으로.</p>
     <h3>반란</h3><p>남이 가진 지역을 탭 → ✊반란 10/100/500/최대. 내 모든 풀에서 빠지고 10초 뒤 70%가 그 지역 안에서 봉기해 방어+사단과 싸운다. 인접할 필요 없음. AI도 똑같이 한다.</p>
     <h3>전투</h3><p>모든 편이 같은 속도로 깎여 가장 센 편이 남는다(잔여 = 1등−2등). 수비 전력 = (방어+사단)×수비배율(⛰산악 1.5·🏙도시 1.2·🌊해안 1.0·🌾평야 0.9). 점령하면 방어 0, 사단은 잔여, 그 지역 풀은 절반만 남는다. 전투 중엔 생산이 멈춘다.</p>
-    <h3>끝</h3><p>230개 다 가지면 정복, 지역·사단·반란이 다 없어지면 전멸 → 환생(유산 포인트 → 상점 영구 보너스, 축복 3택1) 후 새 판. 죽어도 다시 하면 된다.</p>
+    <h3>끝</h3><p>251개 다 가지면 정복, 지역·사단·반란이 다 없어지면 전멸 → 환생(유산 포인트 → 상점 영구 보너스, 축복 3택1) 후 새 판. 죽어도 다시 하면 된다.</p>
     <h3>AI</h3><p>8초마다 국경엔 방어, 안쪽엔 사단을 만들어 국경으로 보내고, 이길 수 있는 이웃을 치고, 4주기마다 집결, 6주기마다 반란한다. 난이도로 AI 생산 배율을 고른다.</p></div>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
 }
 function openMenu() {
@@ -146,20 +141,14 @@ function checkEnd() {
   const st = status(state); if (st === 'playing') return;
   ended = true;
   const pts = pointsFor(st), seed = Date.now() >>> 0;
-  showModal({ title: st === 'conquered' ? '🎉 대한민국 통일!' : '💀 전멸…', html: `<p>${st === 'conquered' ? '230개 지역을 모두 차지했습니다.' : '모든 지역과 사단을 잃었습니다. 다시 하면 됩니다.'}</p><p>유산 포인트 <b>+${pts}</b> (최대 ${state.run.maxRegions}개 지역)</p>${perkPickerHtml(seed)}${mapPickerHtml()}`,
+  showModal({ title: st === 'conquered' ? '🎉 대한민국 통일!' : '💀 전멸…', html: `<p>${st === 'conquered' ? '${state.run.regions.length}개 지역을 모두 차지했습니다.' : '모든 지역과 사단을 잃었습니다. 다시 하면 됩니다.'}</p><p>유산 포인트 <b>+${pts}</b> (최대 ${state.run.maxRegions}개 지역)</p>${perkPickerHtml(seed)}${mapPickerHtml()}`,
     actions: [{ label: '환생', primary: true, onClick: () => { state.legacy.points += pts; state.legacy.prestigeCount += 1; state.legacy.difficulty = pickedDifficulty(); const pk = pickedPerk(); hideModal(); startNew(seed, pk); openShop(() => { hideModal(); refresh(); }); } }] });
 }
-function settle(elapsed) {
-  if (ended || elapsed < RESUME_MIN) return;
-  const cap = (8 + 4 * (state.legacy.upgrades.offline || 0)) * 3600, seconds = Math.min(elapsed, cap);
-  const before = owned(state, PLAYER).length; let rem = seconds;
-  while (rem > 0 && status(state) === 'playing') { tick(state, 1); runAi(state, 1); rem -= 1; }
-  effects = []; save(); ended = true;
-  const after = owned(state, PLAYER).length;
-  showModal({ title: '돌아오셨군요', html: `<p>꺼둔 시간 ${hms(seconds)} 동안</p><p>지역 ${before} → ${after} (${after - before >= 0 ? '+' : ''}${after - before})</p><p>인력 합계 ${formatNum(totalPool(state, PLAYER))}</p>${status(state) === 'wiped' ? '<p>…그리고 모든 지역을 잃었습니다.</p>' : ''}`,
-    actions: [{ label: '확인', primary: true, onClick: () => { hideModal(); ended = false; last = performance.now(); checkEnd(); } }] });
+// 꺼둔 시간은 정산하지 않는다 (2026-09-11 "방치는 없는걸로"): 나가던 그 상황에서 그대로 이어 한다
+function notePause(elapsed) {
+  if (elapsed < PAUSE_MIN) return;
+  flashHint(`⏸ 꺼둔 ${hms(elapsed)} 동안 멈춰 있었습니다 (방치로는 아무 일도 일어나지 않습니다)`, 5000);
 }
-
 function loop(now) {
   const dt = Math.min(1, (now - last) / 1000); last = now;
   if (!ended) {
@@ -190,11 +179,11 @@ function init() {
   attachCanvasInput(canvas, cam, { onTap, minScale: 0.3, maxScale: 6 });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { hiddenAt = Date.now(); save(); return; }
-    if (hiddenAt) { const e = (Date.now() - hiddenAt) / 1000; hiddenAt = 0; last = performance.now(); acc = 0; if (!isModalOpen()) settle(e); }
+    if (hiddenAt) { const e = (Date.now() - hiddenAt) / 1000; hiddenAt = 0; last = performance.now(); acc = 0; if (!isModalOpen()) notePause(e); }
   });
   window.addEventListener('pagehide', () => save());
   const away = state.lastSave > 0 ? (Date.now() - state.lastSave) / 1000 : 0;
-  if (away > 0) settle(away); else if (!localStorage.getItem(SAVE_KEY)) openHelp();
+  if (away > 0) notePause(away); else if (!localStorage.getItem(SAVE_KEY)) openHelp();
   requestAnimationFrame(loop);
 }
 init();

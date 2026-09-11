@@ -14,11 +14,25 @@ export const LEGACY_ITEMS = {
   speed:       { name: '행군',         desc: '행군 속도 +10%/레벨',              max: 10, base: 5 },
   loot:        { name: '약탈',         desc: '점령할 때 골드 +30×타일레벨/레벨', max: 6,  base: 6 },
   regionBonus: { name: '통치',         desc: '지역 완전 점령 보너스 +10%p/레벨',  max: 5,  base: 10 },
-  offline:     { name: '오프라인 한도', desc: '꺼둔 시간 인정 +4시간/레벨',        max: 4,  base: 10 },
   aiSlow:      { name: 'AI 둔화',      desc: 'AI 행동 주기 +8%/레벨',             max: 5,  base: 12 },
   pointsMul:   { name: '유산 축복',    desc: '환생 유산 포인트 +10%/레벨',        max: 10, base: 15 },
 };
-export function itemCost(key, level) { return Math.round(LEGACY_ITEMS[key].base * Math.pow(1.5, level)); }
+// 없앤 유산 (2026-09-11 방치 제거로 '오프라인 한도'가 의미를 잃었다): 저장을 이관할 때 쓴 포인트를 돌려준다
+export const REMOVED_ITEMS = {
+  offline: { name: '오프라인 한도', base: 10 },
+};
+export function itemCost(key, level) { const it = LEGACY_ITEMS[key] || REMOVED_ITEMS[key]; return Math.round(it.base * Math.pow(1.5, level)); }
+export function refundRemoved(legacy) {
+  const u = legacy.upgrades || {};
+  let back = 0;
+  for (const key of Object.keys(REMOVED_ITEMS)) {
+    const lv = u[key] || 0;
+    for (let i = 0; i < lv; i++) back += itemCost(key, i);
+    delete u[key];
+  }
+  if (back) legacy.points = (legacy.points || 0) + back;
+  return back;
+}
 export function buy(state, key) {
   const item = LEGACY_ITEMS[key]; if (!item) return false;
   const u = state.legacy.upgrades; const lv = u[key] || 0;

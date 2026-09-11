@@ -13,8 +13,9 @@ test('상점 비용 = 기본×1.5^레벨, 최대 레벨·포인트 부족이면 
   assert.equal(buy(s, 'gold'), true);
   assert.equal(s.legacy.upgrades.gold, 1);
   assert.equal(s.legacy.points, 7);
-  s.legacy.upgrades.offline = LEGACY_ITEMS.offline.max; s.legacy.points = 1e6;
-  assert.equal(buy(s, 'offline'), false);
+  s.legacy.upgrades.aiSlow = LEGACY_ITEMS.aiSlow.max; s.legacy.points = 1e6;
+  assert.equal(buy(s, 'aiSlow'), false);
+  assert.equal(buy(s, 'offline'), false); // 없앤 유산은 살 수 없다
 });
 
 test('포인트: 정복 = 10 + 타일/4 + 레벨합/10, 전멸 = 최대보유/4(최소 1), 난이도 배수', () => {

@@ -1,8 +1,8 @@
 import { generateRun, PLAYER, TERRAIN } from '../src/world.js';
 import { send, upgrade, neighborIds, upgradeCost, attackMul, previewTargets, dispatch, MAX_LEVEL, runArmies, resolveBattle } from '../src/sim.js';
 export function makeState(seed = 1, prestige = 0, upgrades = {}, mapKey = 'hex') {
-  const u = { gold: 0, soldiers: 0, attack: 0, startArmy: 0, offline: 0, aiSlow: 0, ...upgrades };
-  return { version: 3, legacy: { points: 0, prestigeCount: prestige, upgrades: u, mapPref: mapKey, difficulty: 'normal' }, run: generateRun(seed, prestige, u, mapKey), lastSave: 0 };
+  const u = { gold: 0, soldiers: 0, attack: 0, startArmy: 0, aiSlow: 0, ...upgrades };
+  return { version: 4, legacy: { points: 0, prestigeCount: prestige, upgrades: u, mapPref: mapKey, difficulty: 'normal' }, run: generateRun(seed, prestige, u, mapKey), lastSave: 0 };
 }
 export function capitalOf(state, f) { return state.run.tiles.find(t => t.owner === f && t.terrain === 'citadel'); }
 // 행군 중인 부대를 전부 도착시키고 전투를 끝까지 돌린다 (생산 없이 — 수식 검증용)

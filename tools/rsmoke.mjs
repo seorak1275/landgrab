@@ -45,9 +45,9 @@ export async function run(h) {
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(500);
   say('after rebirth', await h.eval(`document.getElementById('modal-title').textContent + ' prestige=' + __game.state.legacy.prestigeCount + ' points=' + __game.state.legacy.points + ' factions=' + __game.state.run.factions + ' mine=' + __game.state.run.regions.filter(r => r.owner === 0).length`));
   await h.eval(`document.querySelector('#modal-actions button').click()`); await h.wait(200);
-  // 오프라인 정산 (20분)
+  // 20분 비웠다 돌아오기: 방치는 없으니 판이 그대로여야 한다
   await h.eval(`(() => { const s = JSON.parse(localStorage['landgrab.region.v1']); s.lastSave = Date.now() - 1200e3; localStorage['landgrab.region.v1'] = JSON.stringify(s); localStorage.setItem = () => {}; })()`);
   await h.goto(); await h.wait(1500);
-  say('offline', await h.eval(`document.getElementById('modal-title').textContent + ' / ' + document.getElementById('modal-body').innerText.replace(/\\s+/g, ' ').slice(0, 80)`));
+  say('pause', await h.eval(`document.getElementById('hint').textContent + ' / mine=' + __game.state.run.regions.filter(r => r.owner === 0).length + ' elapsed=' + Math.round(__game.state.run.elapsed)`));
   say('console errors', JSON.stringify(h.errors()));
 }

@@ -1,8 +1,9 @@
 // 사단전 모드: 지도 데이터, 규칙, AI, 밸런스
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAP, PLAYER, NEUTRAL, POOL_CAP, REBEL_DELAY, REBEL_RATIO, newRun, tick, status, owned, totalPool, totalProd, allocate, move, rebel, canRebel, predict, runArmies, runBattles, resolveBattle, runRebels, bfsDist, neighbors, prodOf, poolCap, defMul, party, effectiveDefense, setListener } from '../src/region/game.js';
+import { MAP, PLAYER, NEUTRAL, POOL_CAP, REBEL_DELAY, REBEL_RATIO, newRun, tick, status, owned, TRUCE, totalPool, totalProd, allocate, move, rebel, canRebel, predict, runArmies, runBattles, resolveBattle, runRebels, bfsDist, neighbors, prodOf, poolCap, defMul, party, effectiveDefense, setListener } from '../src/region/game.js';
 import { runAi, aiAct, aiPeriod, GATHER_EVERY, REBEL_EVERY } from '../src/region/ai.js';
+import { greedyStep, BOT_EVERY } from '../tools/region_bot.mjs';
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≠ ${b}`);
 function mk(seed = 1, legacy = {}) { const l = { points: 0, prestigeCount: 0, upgrades: {}, difficulty: 'normal', ...legacy }; return { legacy: l, run: newRun(seed, l, legacy.perk || null) }; }
@@ -143,11 +144,20 @@ test('AI: 국경 방어·내부 사단, 유리하면 공격, 집결 주기, 반�
   assert.equal(aiPeriod(s), 8);
 });
 
-test('runAi 타이머, 밸런스: 방치 10분 생존, AI끼리 30분 독식 없음', () => {
+test('밸런스: 휴전 2분 · 능동 플레이어는 10분에 땅을 늘린다 · AI끼리 30분 독식 없음', () => {
+  assert.equal(TRUCE, 120);
+  // 방치는 없앴다 → 기준은 "손을 대면 이긴다". 봇(tools/region_bot.mjs)이 5초마다 수를 둔다
   for (const seed of [1, 2, 3]) {
-    const s = mk(seed);
-    for (let t = 0; t < 600; t++) { tick(s, 1); runAi(s, 1); }
-    assert.equal(status(s), 'playing', `idle seed ${seed}`);
+    const s = mk(seed, { difficulty: 'hell' });
+    for (let t = 0; t < 600; t++) { tick(s, 1); runAi(s, 1); if (t % BOT_EVERY === 0) greedyStep(s); }
+    assert.equal(status(s), 'playing', `active seed ${seed}`);
+    assert.ok(owned(s, PLAYER).length >= 10, `active seed ${seed}: ${owned(s, PLAYER).length}개`);
+  }
+  // 휴전 동안은 손을 놓아도 수도를 잃지 않는다
+  for (const seed of [1, 2]) {
+    const s = mk(seed, { difficulty: 'hell' });
+    for (let t = 0; t < TRUCE; t++) { tick(s, 1); runAi(s, 1); }
+    assert.equal(owned(s, PLAYER).length, 1, `truce seed ${seed}`);
   }
   for (const seed of [1, 2]) {
     const s = mk(seed); const c = cap(s, PLAYER); c.owner = NEUTRAL;
