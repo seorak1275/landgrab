@@ -124,7 +124,11 @@ export function draw(ctx, state, cam, W, H, { selected = null, inspect = null, e
     if (showNum) showNum = place(wNum, fr * 0.85, cx, cy + (showName ? fr * 0.6 : 0));
     if (!showName && !showNum) { dot(); continue; }
     ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-    if (showName) { ctx.font = `bold ${fr}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.strokeText(m.n, cx, cy - (showNum ? fr * 0.7 : 0)); ctx.fillText(m.n, cx, cy - (showNum ? fr * 0.7 : 0)); }
+    if (showName) {
+      const nm = r.provFull ? `★${m.n}` : m.n; // ★ = 그 시·도를 통째로 가진 상태
+      ctx.font = `bold ${fr}px system-ui, sans-serif`; ctx.fillStyle = r.provFull ? '#ffe9a8' : '#fff';
+      ctx.strokeText(nm, cx, cy - (showNum ? fr * 0.7 : 0)); ctx.fillText(nm, cx, cy - (showNum ? fr * 0.7 : 0));
+    }
     if (showNum) {
       const y = cy + (showName ? fr * 0.6 : 0);
       ctx.font = `bold ${fr}px system-ui, sans-serif`;

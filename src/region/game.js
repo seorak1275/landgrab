@@ -17,6 +17,44 @@ export const BOARDS = {
   honam:    { name: '호남·충청', ps: ['광주', '대전', '세종', '충북', '충남', '전북', '전남'],     home: '해남군', maxAi: 3, desc: '광주·대전·세종·충청·전라 77곳 · 🌾평야라 치고받기 쉽다' },
 };
 export const DEFAULT_BOARD = 'all';
+// 시작 지역(수도) 후보. 속초는 산악(중립 수비 ×1.5)에 이웃 셋이 전부 군(생산 1)이라 가장 불리하다 —
+// "강원도에서 항상 시작하는 건 너무 힘들다"는 피드백으로 고를 수 있게 했다. 난이도는 봇 실측으로 붙였다
+// tag/desc 는 봇 실측(지옥, 시드 5개 평균 10분 지역 수)으로 붙였다
+export const HOMES = {
+  all: [
+    { n: '수원 장안구', tag: '쉬움',   desc: '🌾평야 한가운데, 이웃 다섯이 전부 생산 2 안팎 (10분 126곳)' },
+    { n: '전주 완산구', tag: '보통',   desc: '호남 평야, 뒤가 트여 있다 (10분 100곳)' },
+    { n: '청주 흥덕구', tag: '보통',   desc: '나라 한복판, 사방으로 뻗는다 (10분 99곳)' },
+    { n: '천안 서북구', tag: '보통',   desc: '수도권과 충청 사이 길목 (10분 94곳)' },
+    { n: '창원 의창구', tag: '어려움', desc: '🌊해안, 등 뒤는 안전하지만 앞이 좁다 (10분 89곳)' },
+    { n: '속초시',      tag: '어려움', desc: '⛰설악산. 이웃 셋이 전부 산악 군이라 초반이 답답하다 (10분 85곳)' },
+    { n: '안동시',      tag: '도전',   desc: '경북 산속, 생산이 낮고 사방이 산 (10분 50곳)' },
+    { n: '제주시',      tag: '도전',   desc: '섬. 뱃길 하나로만 이어져 나가기 어렵다 (10분 48곳)' },
+  ],
+  capital: [
+    { n: '고양 덕양구', tag: '쉬움',   desc: '서울 서북, 넓은 배후지 (10분 57곳)' },
+    { n: '수원 장안구', tag: '보통',   desc: '경기 남부 중심 (10분 47곳)' },
+    { n: '연천군',      tag: '어려움', desc: '최북단, 이웃이 적다 (10분 41곳)' },
+    { n: '인천 서구',   tag: '도전',   desc: '해안에 몰려 시작한다 (10분 30곳)' },
+  ],
+  yeongnam: [
+    { n: '창원 의창구', tag: '쉬움',   desc: '경남 해안 중심 (10분 47곳)' },
+    { n: '포항 북구',   tag: '보통',   desc: '동해안에서 내륙으로 (10분 38곳)' },
+    { n: '달서구',      tag: '보통',   desc: '대구 도심, 병영이 세다' },
+    { n: '울진군',      tag: '도전',   desc: '산악 끝자락 (10분 17곳)' },
+  ],
+  honam: [
+    { n: '광주 북구',   tag: '쉬움',   desc: '호남 도심 (10분 66곳)' },
+    { n: '전주 완산구', tag: '보통',   desc: '전북 평야 (10분 52곳)' },
+    { n: '해남군',      tag: '어려움', desc: '땅끝, 한쪽으로만 나간다 (10분 47곳)' },
+    { n: '천안 서북구', tag: '도전',   desc: '북쪽 끝에서 남으로 밀고 내려간다 (10분 31곳)' },
+  ],
+};
+export const homesOf = board => HOMES[board] || HOMES[DEFAULT_BOARD];
+export const homeNames = board => homesOf(board).map(h => h.n);
+// 한 시·도(서울·강원…)를 전부 가지면 그 지역들의 생산 +30%, 수비 +15%.
+// 한 판 안에 "강원도를 다 먹자" 같은 중간 목표를 만든다 (지역이 하나뿐인 세종은 제외)
+export const PROV_PROD = 0.3, PROV_DEF = 0.15;
 const boardCache = new Map();
 export function boardIds(key = DEFAULT_BOARD) {
   if (!boardCache.has(key)) {
@@ -26,6 +64,37 @@ export function boardIds(key = DEFAULT_BOARD) {
   return boardCache.get(key);
 }
 export function boardOf(state) { return BOARDS[state.run.board] || BOARDS[DEFAULT_BOARD]; }
+export const provinceOf = id => MAP.regions[id].p;
+const provCache = new Map();
+// 판 안의 시·도 → 지역 id 목록 (지역이 2곳 이상인 시·도만 보너스 대상)
+export function provinceIds(board = DEFAULT_BOARD) {
+  if (!provCache.has(board)) {
+    const m = new Map();
+    for (const id of boardIds(board)) { const p = provinceOf(id); if (!m.has(p)) m.set(p, []); m.get(p).push(id); }
+    for (const [p, ids] of [...m]) if (ids.length < 2) m.delete(p);
+    provCache.set(board, m);
+  }
+  return provCache.get(board);
+}
+// 그 시·도를 통째로 가진 세력 (없으면 null)
+export function provinceHolder(run, p) {
+  const ids = provinceIds(run.board || DEFAULT_BOARD).get(p);
+  if (!ids) return null;
+  const f = run.regions[ids[0]].owner;
+  if (f === NEUTRAL || f === OFF) return null;
+  return ids.every(id => run.regions[id].owner === f) ? f : null;
+}
+export function provProgress(state, p, f = PLAYER) {
+  const ids = provinceIds(state.run.board || DEFAULT_BOARD).get(p) || [];
+  return { mine: ids.filter(id => state.run.regions[id].owner === f).length, total: ids.length };
+}
+// 그 지역에 붙는 시·도 보너스 배율 (유산 '통치' +10%p/레벨과 축복 '통합' ×2는 플레이어만)
+export function provMul(state, r, kind) {
+  if (!r.provFull) return 1;
+  const base = kind === 'def' ? PROV_DEF : PROV_PROD;
+  if (r.owner !== PLAYER) return 1 + base;
+  return 1 + base * ((perkOf(state).unity || 1)) + (kind === 'prod' ? 0.1 * lv(state, 'regionBonus') : 0);
+}
 // 이 판에 있는 이웃만 (권역 판에서 바깥으로는 못 나간다)
 export function adj(run, id) { return MAP.regions[id].adj.filter(n => run.regions[n].owner !== OFF); }
 export const POOL_CAP = 500, CAP_PER_REGION = 2; // 풀 한도 = 500 + 지역당 2 (전국 251곳이면 1000). 고정 500이면 후반에 생산 대부분이 버려져 판이 안 끝났다
@@ -127,10 +196,10 @@ export function difficultyOf(state) { return DIFFICULTIES[state.legacy.difficult
 export function aiMul(state) { return difficultyOf(state).mul + 0.1 * state.legacy.prestigeCount + Math.min(AI_RAMP_MAX, AI_RAMP * (state.run.elapsed || 0) / 600); }
 export function prodMul(state, f) { const base = f === PLAYER ? (1 + 0.1 * lv(state, 'gold') + 0.1 * lv(state, 'soldiers')) * (perkOf(state).gold || 1) * (perkOf(state).soldiers || 1) * rankBonus(state.legacy) * gen(state, 'prod') : aiMul(state); return base * techMul(state.run, f, 'prod'); }
 export function attackMul(state, f) { return (f === PLAYER ? (1 + 0.05 * lv(state, 'attack')) * (perkOf(state).attack || 1) * gen(state, 'attack') : 1) * techMul(state.run, f, 'attack'); }
-export function defMul(state, r) { const base = (TRAIT_DEF[MAP.regions[r.id].tr] || 1) * (r.iso ? isoDef(state, r.owner) : 1); return r.owner === PLAYER ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) * gen(state, 'def') : base; }
+export function defMul(state, r) { const base = (TRAIT_DEF[MAP.regions[r.id].tr] || 1) * (r.iso ? isoDef(state, r.owner) : 1) * provMul(state, r, 'def'); return r.owner === PLAYER ? base * (1 + 0.05 * lv(state, 'wall')) * (perkOf(state).def || 1) * gen(state, 'def') : base; }
 export function poolCap(state, f) { return (POOL_CAP + CAP_PER_REGION * owned(state, f).length) * (f === PLAYER ? 1 + 0.1 * lv(state, 'capBonus') : 1); }
 export function speedOf(state, f) { return (f === PLAYER ? REGION_SPEED * (1 + 0.1 * lv(state, 'speed')) * (perkOf(state).speed || 1) * gen(state, 'speed') : REGION_SPEED) * techMul(state.run, f, 'speed'); }
-export function prodOf(state, r) { return MAP.regions[r.id].prod * prodMul(state, r.owner) * (r.iso ? isoProd(state, r.owner) : 1); }
+export function prodOf(state, r) { return MAP.regions[r.id].prod * prodMul(state, r.owner) * (r.iso ? isoProd(state, r.owner) : 1) * provMul(state, r, 'prod'); }
 export function aiCountFor(prestige) { return Math.min(4 + Math.floor(prestige / 3), 6); }
 export const info = id => MAP.regions[id];
 export const neighbors = id => MAP.regions[id].adj;
@@ -142,13 +211,14 @@ export function bfsDist(from, board = null) {
   for (let i = 0; i < q.length; i++) for (const n of neighbors(q[i])) if (d[n] < 0 && (!inBoard || inBoard.has(n))) { d[n] = d[q[i]] + 1; q.push(n); }
   return d;
 }
-export function newRun(seed, legacy = {}, perk = null, board = legacy.boardPref || DEFAULT_BOARD) {
+export function newRun(seed, legacy = {}, perk = null, board = legacy.boardPref || DEFAULT_BOARD, homeName = legacy.homePref || null) {
   const rand = mulberry32(seed);
   const pk = PERKS[perk] || {};
   const up = legacy.upgrades || {};
   const bd = BOARDS[board] ? board : DEFAULT_BOARD, ids = boardIds(bd), inBoard = new Set(ids);
   const factions = 1 + Math.min(BOARDS[bd].maxAi, Math.max(1, aiCountFor(legacy.prestigeCount || 0) + (pk.aiDelta || 0)));
-  const home = ids.find(i => MAP.regions[i].n === BOARDS[bd].home);
+  const want = homeNames(bd).includes(homeName) ? homeName : BOARDS[bd].home;
+  const home = ids.find(i => MAP.regions[i].n === want) ?? ids.find(i => MAP.regions[i].n === BOARDS[bd].home);
   const capitals = [home];
   while (capitals.length < factions) { // 기존 수도들에서 가장 먼 지역 (판 안에서만)
     const ds = capitals.map(c => bfsDist(c, bd));
@@ -164,7 +234,7 @@ export function newRun(seed, legacy = {}, perk = null, board = legacy.boardPref 
     return { id, owner: NEUTRAL, def: Math.round((15 + m.prod * 20) * (0.8 + rand() * 0.5) * garrisonMul), div: 0 }; // 구 55·시 45·군 35 안팎
   });
   const pool = Array(factions).fill(100); pool[PLAYER] = 300 + 100 * (up.startGold || 0) + (pk.startGold || 0);
-  const run = { seed, mode: 'region', board: bd, factions, regions, pool, capitals, tech: Array.from({ length: factions }, () => ({})), rel: Array.from({ length: factions }, () => Array(factions).fill(0)), pacts: {}, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
+  const run = { seed, mode: 'region', board: bd, home, factions, regions, pool, capitals, tech: Array.from({ length: factions }, () => ({})), rel: Array.from({ length: factions }, () => Array(factions).fill(0)), pacts: {}, armies: [], rebels: [], aiTimers: Array(factions).fill(0), aiTurns: [], maxRegions: 1, sendRatio: 0.5, elapsed: 0, ...(perk && PERKS[perk] ? { perk } : {}) };
   refreshSupply({ legacy, run });
   return run;
 }
@@ -180,6 +250,10 @@ export function supplyHub(state, f) {
 }
 export function refreshSupply(state) {
   const run = state.run;
+  // 시·도 완전 점령 표시 (생산·수비 보너스)
+  const provs = provinceIds(run.board || DEFAULT_BOARD);
+  for (const r of run.regions) if (r.owner !== OFF) r.provFull = false;
+  for (const [p, ids] of provs) { const h = provinceHolder(run, p); if (h !== null) for (const id of ids) run.regions[id].provFull = true; }
   for (const r of run.regions) if (r.owner !== OFF) r.iso = r.owner !== NEUTRAL;
   for (let f = 0; f < run.factions; f++) {
     const hub = supplyHub(state, f); if (hub === null) continue;

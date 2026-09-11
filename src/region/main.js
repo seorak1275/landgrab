@@ -1,5 +1,5 @@
 // 사단전 모드 배선 (region.html)
-import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
+import { MAP, PLAYER, NEUTRAL, OFF, newRun, tick, status, owned, activeCount, totalPool, totalProd, allocate, move, rebel, canRebel, predict, setListener, prodOf, poolCap, defMul, info, adj, TRAIT_NAME, difficultyOf, REBEL_DELAY, REBEL_RATIO, BOARDS, DEFAULT_BOARD, boardOf, HOMES, homesOf, homeNames, provinceIds, provinceHolder, provProgress, provMul, PROV_PROD, ISO_PROD, ISO_DEF, supplyHub, autoDeploy, moveFar, pathThroughMine, truce, TRUCE, TECHS, techsOf, techCost, hasTech, techCount, research, atPeace, pactLeft, relOf, proposePact, refusedLeft, leaderOf, PACT_DUR } from './game.js';
 import { runAi } from './ai.js';
 import { draw, pickRegion, bounds, centerOf, regionBox } from './render.js';
 import { createCamera, ownerColor, FACTION_COLORS, setColorblind } from '../render.js';
@@ -101,6 +101,13 @@ function refresh() {
   const r = state.run.regions[id], m = info(id), mine = r.owner === PLAYER;
   $('p-title').innerHTML = `<span style="color:${ownerColor(r.owner)}">■</span> ${m.p} ${m.n} · ${ownerName(r.owner)} · ${TRAIT_NAME[m.tr]}`;
   const lines = [`🛡 방어 ${Math.floor(r.def)} · ⚔ 사단 ${Math.floor(r.div)} · 수비 배율 ×${defMul(state, r).toFixed(2)}`];
+  const pg = provProgress(state, m.p);
+  if (pg.total > 1) {
+    const holder = provinceHolder(state.run, m.p);
+    lines.push(holder === PLAYER
+      ? `★ ${m.p} 완전 점령 — 이 시·도 전체 생산 +${Math.round((provMul(state, r, 'prod') - 1) * 100)}%, 수비 +15%`
+      : `⛳ ${m.p} ${pg.mine}/${pg.total}${holder !== null ? ` · 지금 주인 ${ownerName(holder)}` : ''} — 다 가지면 생산 +${Math.round(PROV_PROD * 100)}%, 수비 +15%`);
+  }
   if (r.owner !== NEUTRAL && r.iso) lines.push(`⛓ 고립 — 본국(${r.owner === PLAYER ? info(supplyHub(state, PLAYER)).n : '상대 수도'})과 이어진 길이 끊겨 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}`);
   if (r.owner !== NEUTRAL) lines.push(`생산력 ${prodOf(state, r).toFixed(2)}/초 (${m.t})${mine ? ` · 내 인력 ${Math.floor(totalPool(state, PLAYER))}/${Math.floor(poolCap(state, PLAYER))} (전 지역 합산 +${totalProd(state, PLAYER).toFixed(1)}/초)` : ''}`);
   else lines.push(`중립 · 생산력 ${m.prod}/초 (${m.t}) · 점령하려면 ${Math.floor(r.def * defMul(state, r)) + 1}명 넘게`);
@@ -153,13 +160,26 @@ function mapPickerHtml() {
 const pickedDifficulty = () => { const el = document.querySelector('input[name="diff"]:checked'); return el ? el.value : state.legacy.difficulty; };
 function boardPickerHtml() {
   const cur = state.legacy.boardPref || state.run.board || DEFAULT_BOARD;
-  return `<p class="sub">판 (권역을 고르면 짧고 빠른 판)</p>` + Object.entries(BOARDS).map(([k, b]) => `<label class="diff-row"><input type="radio" name="board" value="${k}" ${k === cur ? 'checked' : ''}> ${b.name} <span class="desc">${b.desc}${b.maxAi < 6 ? ` · AI 최대 ${b.maxAi}` : ''}</span></label>`).join('');
+  return `<p class="sub">판 (권역을 고르면 짧고 빠른 판)</p>` + Object.entries(BOARDS).map(([k, b]) => `<label class="diff-row"><input type="radio" name="board" value="${k}" ${k === cur ? 'checked' : ''}> ${b.name} <span class="desc">${b.desc}${b.maxAi < 6 ? ` · AI 최대 ${b.maxAi}` : ''}</span></label>`).join('')
+    + `<div id="home-pick">${homePickerHtml(cur)}</div>`;
+}
+const TAG_COLOR = { '쉬움': '#6fe38f', '보통': '#8fd0ff', '어려움': '#ffd479', '도전': '#ff9c9c' };
+function homePickerHtml(board) {
+  const cur = state.legacy.homePref && homeNames(board).includes(state.legacy.homePref) ? state.legacy.homePref : BOARDS[board].home;
+  return `<p class="sub">시작 지역 (내 수도 · 어디서 시작하느냐로 초반이 크게 달라집니다)</p>` + homesOf(board).map(h => `<label class="diff-row"><input type="radio" name="home" value="${h.n}" ${h.n === cur ? 'checked' : ''}> ${h.n} <b style="color:${TAG_COLOR[h.tag]}">${h.tag}</b> <span class="desc">${h.desc}</span></label>`).join('');
 }
 const pickedBoard = () => { const el = document.querySelector('input[name="board"]:checked'); return el ? el.value : (state.legacy.boardPref || DEFAULT_BOARD); };
+const pickedHome = () => { const el = document.querySelector('input[name="home"]:checked'); return el ? el.value : null; };
+// 판을 바꾸면 시작 지역 목록도 따라 바뀐다
+function wireBoardPicker() {
+  for (const el of document.querySelectorAll('input[name="board"]')) {
+    el.addEventListener('change', () => { const box = $('home-pick'); if (box) box.innerHTML = homePickerHtml(el.value); });
+  }
+}
 const pickedPerk = () => { const el = document.querySelector('input[name="perk"]:checked'); return el ? el.value : null; };
 function perkPickerHtml(seed) { return `<p class="sub">이번 판 축복 (하나 선택)</p><div class="perk-row">${offerPerks(seed).map((k, i) => `<label><input type="radio" name="perk" value="${k}" ${i === 0 ? 'checked' : ''}><b>${PERKS[k].icon} ${PERKS[k].name}</b><span class="desc">${PERKS[k].desc}</span></label>`).join('')}</div>`; }
 function openCareer(after = hideModal) { openCareerModal({ state, save: () => save(), after, mode: 'region', boardName: k => (BOARDS[k] || {}).name, canChangeLead: () => truce(state) || !state.legacy.lead }); }
-function startNew(seed, perk, board = state.legacy.boardPref || DEFAULT_BOARD) { state.legacy.boardPref = board; state.run = newRun(seed, state.legacy, perk, board); sel = null; inspect = null; ended = false; effects = []; fitAll(); focusOn(state.run.regions.findIndex(r => r.owner === PLAYER)); save(); refresh(); }
+function startNew(seed, perk, board = state.legacy.boardPref || DEFAULT_BOARD, home = state.legacy.homePref) { state.legacy.boardPref = board; if (home) state.legacy.homePref = home; state.run = newRun(seed, state.legacy, perk, board, home); sel = null; inspect = null; ended = false; effects = []; fitAll(); focusOn(state.run.regions.findIndex(r => r.owner === PLAYER)); save(); refresh(); }
 function openShop(after = hideModal) {
   const rows = Object.entries(LEGACY_ITEMS).map(([k, it]) => {
     const lv = state.legacy.upgrades[k] || 0, maxed = lv >= it.max, locked = itemLocked(it, state.legacy), cost = maxed ? null : itemCost(k, lv);
@@ -227,6 +247,24 @@ function openFind(q = '') {
   const el = $('find-q');
   if (el) { el.addEventListener('input', () => { const v = el.value; openFind(v); const e2 = $('find-q'); if (e2) { e2.focus(); e2.setSelectionRange(v.length, v.length); } }); }
 }
+function openStatus(after = hideModal) {
+  const total = activeCount(state);
+  const rows = [];
+  for (let f = 0; f < state.run.factions; f++) {
+    const n = owned(state, f).length, pct = Math.round(n / total * 100);
+    const provs = [...provinceIds(state.run.board || DEFAULT_BOARD).keys()].filter(p => provinceHolder(state.run, p) === f);
+    rows.push(`<div class="shop-row"><span class="name" style="color:${ownerColor(f)}">${ownerName(f)} <b>${n}곳 (${pct}%)</b>
+      <span class="desc">인력 ${Math.floor(totalPool(state, f))} · 생산 ${totalProd(state, f).toFixed(0)}/초${provs.length ? ` · ★ ${provs.join(' ')}` : ''}</span>
+      <span style="display:block;height:6px;margin-top:4px;background:#2a3644;border-radius:3px"><span style="display:block;height:6px;width:${Math.max(2, pct)}%;background:${ownerColor(f)};border-radius:3px"></span></span></span></div>`);
+  }
+  const provs = [...provinceIds(state.run.board || DEFAULT_BOARD).entries()]
+    .map(([p, ids]) => { const h = provinceHolder(state.run, p); const mine = ids.filter(id => state.run.regions[id].owner === PLAYER).length; return { p, h, mine, total: ids.length }; })
+    .sort((a, b) => (b.mine / b.total) - (a.mine / a.total));
+  const provRow = provs.map(x => `<span style="color:${x.h === null ? '#aaa' : ownerColor(x.h)}">${x.h !== null ? '★' : ''}${x.p} ${x.mine}/${x.total}</span>`).join(' · ');
+  showModal({ title: `📊 전황 · ${hms(Math.round(state.run.elapsed || 0))}째`, html: `${rows.join('')}
+    <p class="sub">시·도 (★ = 완전 점령, 그 시·도 생산 +${Math.round(PROV_PROD * 100)}%·수비 +15%)</p><p>${provRow}</p>`,
+    actions: [{ label: '닫기', onClick: after, primary: true }] });
+}
 function openLog() {
   const L = logs();
   const rows = L.map((x, i) => `<div class="shop-row"><span class="name" style="color:${x.kind === 'bad' ? '#ff9c9c' : x.kind === 'good' ? '#9ae6b4' : '#ddd'}">${x.text}<span class="desc">${hms(x.t)}째</span></span>${x.id !== null && x.id !== undefined ? `<button data-action="go:${x.id}">보기</button>` : ''}</div>`).join('')
@@ -243,6 +281,8 @@ function openHelp() {
     <h3>반란</h3><p>남이 가진 지역을 탭 → ✊반란 10/100/500/최대. 내 모든 풀에서 빠지고 10초 뒤 70%가 그 지역 안에서 봉기해 방어+사단과 싸운다. 인접할 필요 없음. AI도 똑같이 한다.</p>
     <h3>연구</h3><p>패널의 🔬<b>연구</b>로 인력을 들여 그 판 동안 쓸 기술을 산다: ${Object.values(TECHS).map(t => `${t.icon}${t.name}(${t.desc})`).join(' · ')}. 하나 살 때마다 다음 값이 1.6배. AI도 똑같이 연구한다.</p>
     <h3>외교</h3><p>🤝<b>외교</b>로 AI에 <b>정전</b>(${PACT_DUR}초)을 제안한다. 정전 중엔 서로 못 친다. 어기면 관계가 크게 깎이고 다른 세력도 나를 믿지 않는다. AI들은 👑<b>선두를 싫어해</b> 자기들끼리 손을 잡으니, 내가 너무 앞서면 사방에서 몰려온다.</p>
+    <h3>시·도 완전 점령</h3><p>한 시·도(서울·강원·경북…)의 지역을 <b>전부</b> 가지면 그 시·도 지역들의 생산 +${Math.round(PROV_PROD * 100)}%, 수비 +15%(유산 '통치'로 더, 축복 '통합'이면 두 배). 지도에서 ★가 붙고, 패널에 ⛳ 진행도(예: 강원 12/18)가 뜬다. 한 판 안의 중간 목표다. ≡ 메뉴 📊<b>전황</b>에서 세력별 세력도와 시·도 점유를 한눈에 본다.</p>
+    <h3>시작 지역</h3><p>환생 창이나 "난이도 바꿔 새 판"에서 <b>시작 지역</b>을 고른다. 쉬움(수원 장안구)부터 도전(제주시·안동시)까지 붙은 표시는 봇으로 실측한 초반 속도다. 속초시(설악산)는 이웃 셋이 전부 산악 군이라 어려움 쪽이다.</p>
     <h3>보급 (본국 연결)</h3><p>내 <b>본국</b>(수도, 잃으면 생산력이 가장 큰 내 지역)에서 <b>내 지역만 밟아</b> 닿지 않는 지역은 ⛓<b>고립</b>이다. 고립 지역은 생산 ×${ISO_PROD}, 수비 ×${ISO_DEF}이고 지도에서 어둡게 보인다. AI도 똑같이 당하니, 크게 뻗은 AI의 <b>허리를 끊으면</b> 뒤쪽 땅이 한꺼번에 약해진다.</p>
     <h3>기록</h3><p>패널의 📜<b>기록</b>에 점령·상실·봉기·배신·격파·연구가 최근 30건까지 남는다. [보기]를 누르면 그 지역으로 간다. 정전 중인 세력 땅에는 흰 점선 테두리가 뜬다.</p>
     <h3>화면</h3><p>한 손가락으로 밀어 이동, 두 손가락으로 확대·축소(많이 들어갈 수 있다), ⌖로 전체 보기. 서울처럼 작은 구는 확대해야 이름이 뜬다. ≡ 메뉴의 🔍<b>지역 찾기</b>에 이름 일부를 넣으면 그 지역으로 바로 옮겨 준다.</p>
@@ -254,7 +294,7 @@ function openHelp() {
 }
 function openMenu() {
   showModal({ title: '메뉴 · 사단전', html: `<p>🎖 ${rankOf(state.legacy).name} · 유산 ✨ ${state.legacy.points} · 환생 ${state.legacy.prestigeCount}회 · 난이도 ${difficultyOf(state).name}</p>
-    <p><button data-action="help">📖 도움말</button> <button data-action="find">🔍 지역 찾기</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="restart">난이도 바꿔 새 판</button></p>
+    <p><button data-action="status">📊 전황</button> <button data-action="help">📖 도움말</button> <button data-action="find">🔍 지역 찾기</button> <button data-action="shop">유산 상점</button> <button data-action="career">🎖 전적·계급</button> <button data-action="restart">난이도 바꿔 새 판</button></p>
     <p><label><input type="checkbox" data-action="cb" ${state.legacy.colorblind ? 'checked' : ''}> 색약 모드</label></p>
     <p><button data-action="export">저장 내보내기</button> <button data-action="import">저장 가져오기</button> <button data-action="reset" style="color:#eb5757">처음부터</button></p>
     <p><a href="index.html" style="color:#6fb1ff">⬡ 육각 모드로 가기</a></p>`,
@@ -264,8 +304,9 @@ function openMenu() {
       if (a === 'shop') openShop(openMenu);
       if (a === 'career') openCareer(openMenu);
       if (a === 'find') openFind();
+      if (a === 'status') openStatus(openMenu);
       if (a === 'cb') { state.legacy.colorblind = el.checked; setColorblind(el.checked); save(); }
-      if (a === 'restart') showModal({ title: '새 판', html: `<p>이번 판을 버리고 새로 시작합니다(유산 유지, 포인트 없음).</p>${mapPickerHtml()}`, actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => { state.legacy.difficulty = pickedDifficulty(); const bd = pickedBoard(); hideModal(); startNew(Date.now() >>> 0, null, bd); } }] });
+      if (a === 'restart') { showModal({ title: '새 판', html: `<p>이번 판을 버리고 새로 시작합니다(유산 유지, 포인트 없음).</p>${mapPickerHtml()}`, actions: [{ label: '취소', onClick: hideModal }, { label: '새로 시작', primary: true, onClick: () => { state.legacy.difficulty = pickedDifficulty(); const bd = pickedBoard(), hm = pickedHome(); hideModal(); startNew(Date.now() >>> 0, null, bd, hm); } }] }); wireBoardPicker(); }
       if (a === 'export') showModal({ title: '저장 내보내기', html: `<textarea readonly>${JSON.stringify(state)}</textarea>`, actions: [{ label: '닫기', onClick: hideModal, primary: true }] });
       if (a === 'import') showModal({ title: '저장 가져오기', html: `<textarea id="import-text"></textarea><p id="import-msg"></p>`, actions: [{ label: '취소', onClick: hideModal }, { label: '가져오기', primary: true, onClick: () => { try { const o = JSON.parse($('import-text').value); if (!o.run || o.run.mode !== 'region') throw 0; state = o; sel = null; inspect = null; ended = false; fitAll(); save(); hideModal(); refresh(); } catch { $('import-msg').textContent = '형식이 맞지 않습니다.'; } } }] });
       if (a === 'reset') showModal({ title: '정말 삭제할까요?', html: '<p>사단전 모드의 유산·환생 기록까지 전부 사라집니다.</p>', actions: [{ label: '취소', onClick: hideModal }, { label: '삭제', onClick: () => { localStorage.removeItem(SAVE_KEY); state = newState(); sel = null; inspect = null; ended = false; fitAll(); save(); hideModal(); refresh(); } }] });
@@ -305,6 +346,7 @@ function checkEnd() {
       hideModal(); startNew(seed, pk, bd); openShop(() => { hideModal(); refresh(); });
     } }],
   });
+  wireBoardPicker();
 }
 // 꺼둔 시간은 정산하지 않는다 (2026-09-11 "방치는 없는걸로"): 나가던 그 상황에서 그대로 이어 한다
 function notePause(elapsed) {
